@@ -85,3 +85,4 @@ jobs:
             -Dsonar.projectKey=${{ env.sonar_key }} \
             -Dsonar.organization=${{ env.sonar_organization }} \
             -Dsonar.token=${{ secrets.token }}
+            -Dsonar.branch.name=${{ github.ref_name }}
