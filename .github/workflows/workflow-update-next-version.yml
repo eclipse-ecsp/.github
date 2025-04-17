@@ -12,6 +12,11 @@ jobs:
   update_version:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Get the branch of the release tag
         id: get_branch_name
         run: |
