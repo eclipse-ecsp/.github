@@ -25,6 +25,11 @@ on:
         required: false
         type: string
         default: 'eclipseecsp'
+      update_maven_version:
+        description: 'Whether to update the project version'
+        required: false
+        type: boolean
+        default: true
       maven_args:
         description: 'The Maven goals to execute'
         required: false
@@ -70,6 +75,13 @@ jobs:
         if: ${{ inputs.maven_args != '' }}
         run: |
           mvn ${{ inputs.maven_args }}
+
+      # Step to update the Maven project version if specified.
+      - name: Update Maven version
+        id: update-version
+        if: ${{ inputs.update_maven_version }}
+        run: |
+          mvn versions:set -DnewVersion=${{ inputs.image_tag }} -DgenerateBackupPoms=false
 
       # Step to extract Maven artifact details (groupId, artifactId, version) from the `pom.xml`.
       - name: Extract pom details

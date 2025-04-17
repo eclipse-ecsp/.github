@@ -1,0 +1,66 @@
+name: Update Project Version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The new version to set for the project'
+        required: true
+        type: string
+
+jobs:
+  update_version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the branch of the release tag
+        id: get_branch_name
+        run: |
+          tag_commit=$(git rev-list -n 1 $GITHUB_REF_NAME)
+          branch_name=$(git branch -r --contains $tag_commit | grep -v '\->' | head -n 1 | cut -d'/' -f2-)
+          echo "branch_name=$branch_name" >> $GITHUB_ENV
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 0
+          ref: ${{ env.branch_name }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+          cache: maven
+
+      - name: update to snapshot version
+        run: |
+          mvn versions:set -DnewVersion=${{ inputs.version }}-SNAPSHOT -DgenerateBackupPoms=false
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: get all the pom.xml files
+        id: get_pom_files
+        run: |
+          pom_files=$(find . -name "pom.xml")
+          echo "pom_files=$pom_files" >> $GITHUB_ENV
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: ${{ env.pom_files }}
+          token: ${{ secrets.ECSP_BOT_PAT }}
+          branch: chore/update-next-version
+          commit-message: "chore(version): Update version"
+          delete-branch: true
+          title: Update next version
+          body: |
+            This PR updates the next version
