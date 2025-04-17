@@ -52,6 +52,7 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           add-paths: |
+            pom.xml
             **/pom.xml
           token: ${{ secrets.ECSP_BOT_PAT }}
           branch: chore/update-next-version
