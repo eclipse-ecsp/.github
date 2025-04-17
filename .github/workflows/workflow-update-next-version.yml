@@ -1,0 +1,54 @@
+name: Update Project Version
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The new version to set for the project'
+        required: true
+        type: string
+
+jobs:
+  update_version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: get the branch name from the commit
+        id: get_branch_name
+        run: |
+          echo "branch_name=git branch -r --contains $GITHUB_SHA | grep HEAD | cut -d'/' -f3" >> $GITHUB_ENV
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.branch_name }}
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+          cache: maven
+
+      - name: update to snapshot version
+        run: |
+          mvn versions:set -DnewVersion=${{ inputs.version }}-SNAPSHOT -DgenerateBackupPoms=false
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          add-paths: |
+            **/pom.xml
+          token: ${{ secrets.ECSP_BOT_PAT }}
+          branch: chore/update-next-version
+          commit-message: "chore(version): Update version"
+          delete-branch: true
+          title: Update next version
+          body: |
+            This PR updates the next version
