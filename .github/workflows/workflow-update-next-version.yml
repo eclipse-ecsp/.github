@@ -7,6 +7,11 @@ on:
         description: 'The new version to set for the project'
         required: true
         type: string
+      update_snapshot:
+        description: 'Whether to update the version to a snapshot'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   update_version:
@@ -38,9 +43,9 @@ jobs:
           distribution: 'zulu'
           cache: maven
 
-      - name: update to snapshot version
+      - name: Update version
         run: |
-          mvn versions:set -DnewVersion=${{ inputs.version }}-SNAPSHOT -DgenerateBackupPoms=false
+          mvn versions:set -DnewVersion=${{ inputs.version }}${{ inputs.update_snapshot && '-SNAPSHOT' || '' }} -DgenerateBackupPoms=false
 
       - name: Configure Git
         run: |
