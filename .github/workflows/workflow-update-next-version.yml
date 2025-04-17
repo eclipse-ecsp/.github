@@ -15,7 +15,7 @@ jobs:
       - name: get the branch name from the commit
         id: get_branch_name
         run: |
-          echo "branch_name=git branch -r --contains $GITHUB_SHA | grep HEAD | cut -d'/' -f3" >> $GITHUB_ENV
+          echo "branch_name=$(git branch -r --contains $GITHUB_SHA | grep HEAD | cut -d'/' -f3)" >> $GITHUB_ENV
 
       - name: Checkout code
         uses: actions/checkout@v4
