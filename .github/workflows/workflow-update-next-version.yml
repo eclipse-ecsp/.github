@@ -47,13 +47,16 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
 
+      - name: get all the pom.xml files
+        id: get_pom_files
+        run: |
+          pom_files=$(find . -name "pom.xml")
+          echo "pom_files=$pom_files" >> $GITHUB_ENV
 
       - name: Create pull request
         uses: peter-evans/create-pull-request@v6
         with:
-          add-paths: |
-            pom.xml
-            **/pom.xml
+          add-paths: ${{ env.pom_files }}
           token: ${{ secrets.ECSP_BOT_PAT }}
           branch: chore/update-next-version
           commit-message: "chore(version): Update version"
