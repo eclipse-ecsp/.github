@@ -76,6 +76,13 @@ jobs:
         run: |
           mvn ${{ inputs.maven_args }}
 
+      # Step to extract Maven artifact details (groupId, artifactId, version) from the `pom.xml`.
+      - name: Extract pom details
+        id: extract-info
+        uses: andreacomo/maven-gav-extractor@v2.0.1
+        with:
+          pom-location: ${{ inputs.context_path}}/pom.xml
+          
       # Step to update the Maven project version if specified.
       - name: Update Maven version
         id: update-version
@@ -83,12 +90,6 @@ jobs:
         run: |
           mvn versions:set -DnewVersion=${{ inputs.image_tag }} -DgenerateBackupPoms=false
 
-      # Step to extract Maven artifact details (groupId, artifactId, version) from the `pom.xml`.
-      - name: Extract pom details
-        id: extract-info
-        uses: andreacomo/maven-gav-extractor@v2.0.1
-        with:
-          pom-location: ${{ inputs.context_path}}/pom.xml
 
       # Step to set the Docker image name and tag based on inputs or extracted Maven details.
       - name: Set image name and tag
