@@ -68,19 +68,6 @@ jobs:
           java-version: ${{ inputs.java_version }}
           distribution: zulu
           cache: maven
-           # Step to update the Maven project version if specified.
-      - name: Update Maven version
-        id: update-version
-        if: ${{ inputs.update_maven_version }}
-        run: |
-          mvn versions:set -DnewVersion=${{ inputs.image_tag }} -DgenerateBackupPoms=false
-
-      # Step to execute Maven build if Maven arguments are provided.
-      - name: Maven Build
-        id: maven_build
-        if: ${{ inputs.maven_args != '' }}
-        run: |
-          mvn ${{ inputs.maven_args }}
 
       # Step to extract Maven artifact details (groupId, artifactId, version) from the `pom.xml`.
       - name: Extract pom details
@@ -88,7 +75,6 @@ jobs:
         uses: andreacomo/maven-gav-extractor@v2.0.1
         with:
           pom-location: ${{ inputs.context_path}}/pom.xml
-
 
       # Step to set the Docker image name and tag based on inputs or extracted Maven details.
       - name: Set image name and tag
@@ -127,6 +113,20 @@ jobs:
         with:
           images: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ env.image_name}}:${{ env.image_tag }}
 
+      # Step to update the Maven project version if specified.
+      - name: Update Maven version
+        id: update-version
+        if: ${{ inputs.update_maven_version }}
+        run: |
+          mvn versions:set -DnewVersion=${{ env.image_tag }} -DgenerateBackupPoms=false
+
+      # Step to execute Maven build if Maven arguments are provided.
+      - name: Maven Build
+        id: maven_build
+        if: ${{ inputs.maven_args != '' }}
+        run: |
+          mvn ${{ inputs.maven_args }}
+          
       # Step to build and optionally push the Docker image to the specified registry.
       - name: Build and push Docker image
         id: push-image
