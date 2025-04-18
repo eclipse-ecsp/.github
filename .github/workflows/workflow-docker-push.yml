@@ -138,6 +138,6 @@ jobs:
           tags: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ env.image_name}}:${{ env.image_tag }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            PROJECT_JAR_NAME=${{  steps.extract-info.outputs.artifact-id }}-${{ steps.extract-info.outputs.version }}
+            PROJECT_JAR_NAME=${{  steps.extract-info.outputs.artifact-id }}-${{ env.image_tag }}
             API_WAR_NAME=${{  steps.extract-info.outputs.artifact-id }}
-            PROJECT_JAR_VERSION=${{ steps.extract-info.outputs.version }}
+            PROJECT_JAR_VERSION=${{ env.image_tag }}
