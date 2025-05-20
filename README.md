@@ -22,7 +22,25 @@ This repository contains reusable GitHub Actions workflows for Java projects, es
 - **workflow-dependencies-update.yml**  
   Automatically updates the `DEPENDENCIES` file using Eclipse Dash and creates a pull request if changes are detected.
 
-## Usage
+## Actions
+
+- **import-gpg-key**  
+  Composite action to import a GPG private key for signing artifacts in CI/CD workflows.
+
+### Action Usage
+
+```yaml
+jobs:
+  import-gpg:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: eclipse-ecsp/.github/.github/actions/import-gpg-key@main
+        with:
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+```
+
+## Workflow Usage
 
 To use these workflows in your repository, call them from your own workflow YAML files using the `workflow_call` event.
 
