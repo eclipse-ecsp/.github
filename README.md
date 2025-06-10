@@ -17,7 +17,7 @@ This repository contains reusable GitHub Actions workflows for Java projects, es
   Performs license analysis using Maven and Eclipse Dash. Optionally creates a review and checks that the `DEPENDENCIES` file is up to date.
 
 - **workflow-publish-artifacts.yml**  
-  Publishes Maven artifacts to OSSRH (Sonatype/Maven Central) if required secrets are present. Handles GPG signing, versioning, and license file inclusion.
+  Publishes Maven artifacts to Central (Sonatype/Maven Central) if required secrets are present. Handles GPG signing, versioning, and license file inclusion.
 
 - **workflow-dependencies-update.yml**  
   Automatically updates the `DEPENDENCIES` file using Eclipse Dash and creates a pull request if changes are detected.
@@ -120,8 +120,8 @@ jobs:
     secrets:
       GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
       GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-      OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-      OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+      CENTRAL_SONATYPE_TOKEN_USERNAME: ${{ secrets.CENTRAL_SONATYPE_TOKEN_USERNAME }}
+      CENTRAL_SONATYPE_TOKEN_PASSWORD: ${{ secrets.CENTRAL_SONATYPE_TOKEN_PASSWORD }}
 ```
 
 ### Dependency Update
