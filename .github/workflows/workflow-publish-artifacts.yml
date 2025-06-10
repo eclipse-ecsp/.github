@@ -25,8 +25,8 @@ jobs:
         run: |
           [ ! -z "${{ secrets.GPG_PASSPHRASE }}" ] && 
           [ ! -z "${{ secrets.GPG_PRIVATE_KEY }}" ] && 
-          [ ! -z "${{ secrets.OSSRH_USERNAME }}" ] && 
-          [ ! -z "${{ secrets.OSSRH_PASSWORD }}" ]  && 
+          [ ! -z "${{ secrets.CENTRAL_SONATYPE_TOKEN_USERNAME }}" ] && 
+          [ ! -z "${{ secrets.CENTRAL_SONATYPE_TOKEN_PASSWORD }}" ]  && 
           echo "HAS_OSSRH=true" >> $GITHUB_OUTPUT
           exit 0
 
