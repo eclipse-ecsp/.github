@@ -31,7 +31,7 @@ jobs:
           exit 0
 
   publish-to-sonatype:
-    name: "Publish artifacts to OSSRH Snapshots / MavenCentral"
+    name: "Publish artifacts to central sonartype / MavenCentral"
     runs-on: ubuntu-latest
     permissions:
       contents: read
