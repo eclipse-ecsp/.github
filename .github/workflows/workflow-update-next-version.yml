@@ -55,7 +55,7 @@ jobs:
       - name: get all the pom.xml files
         id: get_pom_files
         run: |
-          pom_files=$(find . -name "pom.xml")
+          pom_files=$(find . -name "pom.xml" | tr '\n' ' ')
           echo "pom_files=$pom_files" >> $GITHUB_ENV
 
       - name: Create pull request
