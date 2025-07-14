@@ -12,7 +12,7 @@ on:
         description: 'The Dash project ID'
         required: false
         type: string
-        default: ''
+        default: 'automotive.ecsp'
       dash_repo:
         description: 'The Dash repository URL'
         required: false
@@ -68,7 +68,7 @@ jobs:
       - name: Build with Maven and check dependencies with dash
         run: |
            if [ "${{ inputs.create-review }}" = "true" ]; then
-              mvn --batch-mode --update-snapshots verify -Ddash.projectId=${{ inputs.dash_project_id }} -Ddash.repo=${{ inputs.dash_repo }} -Ddash.iplab.token=${{ secrets.token }} -P dash
+              mvn --batch-mode --update-snapshots verify -Ddash.projectId=${{ env.dash_project_id }} -Ddash.repo=${{ env.dash_repo }} -Ddash.iplab.token=${{ secrets.token }} -P dash
            else
               mvn --batch-mode --update-snapshots verify -P dash
            fi
