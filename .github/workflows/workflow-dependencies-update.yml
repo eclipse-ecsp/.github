@@ -23,8 +23,8 @@ jobs:
       - name: Get the branch of the commit hash
         id: get_branch_name
         run: |
-          tag_commit=$(git rev-parse --short "$GITHUB_SHA")
-          branch_name=$(git branch -r --contains $tag_commit | grep -v '\->' | head -n 1 | cut -d'/' -f2-)
+          last_commit_hash=$(git log -1 --format=%H)
+          branch_name=$(git branch -r --contains $last_commit_hash | grep -v '\->' | head -n 1 | cut -d'/' -f2-)
           echo "branch_name=$branch_name" >> $GITHUB_ENV
           
       - name: Checkout code
