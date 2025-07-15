@@ -24,6 +24,7 @@ jobs:
         id: get_branch_name
         if: ${{ github.event_name == 'pull_request' }}
         run: |
+          git fetch --all
           last_commit_hash=${{ github.event.pull_request.head.sha }}
           branch_name=$(git branch -r --contains $last_commit_hash | grep -v '\->' | head -n 1 | cut -d'/' -f2-)
           echo "branch_name=$branch_name" >> $GITHUB_ENV
