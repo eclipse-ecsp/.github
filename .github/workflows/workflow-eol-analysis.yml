@@ -75,7 +75,7 @@ jobs:
     - name: Checkout EOL workflow repository
       uses: actions/checkout@v4
       with:
-        repository: ${{ github.repository }}
+        repository: eclipse-ecsp/.github
         path: ./.eol-workflow-repo
         
     - name: Build project
@@ -266,46 +266,11 @@ jobs:
               except ValueError:
                   print(f"  ❌ Error: Invalid format for custom_mappings. Please use 'key=value,key2=value2'.")
 
-          # Create dynamic EOL mappings based on actual dependencies found
-          def create_dynamic_eol_mappings(dependencies, rules):
-              """
-              Dynamically create EOL product mappings based on the actual dependencies found.
-              This analyzes dependency groupIds and creates targeted mappings for EOL tracking.
-              """
-              print("  Analyzing dependencies for EOL mapping...")
-              
-              eol_mappings = {}
-              dependency_groups = set()
-              
-              for dep_key, dep_info in dependencies.items():
-                  group_id = dep_info['groupId']
-                  dependency_groups.add(group_id)
-                  
-                  # Check for exact matches first
-                  if group_id in rules:
-                      eol_product = rules[group_id]
-                      eol_mappings[group_id] = eol_product
-                      continue
-                  
-                  # Check for prefix matches (for sub-modules)
-                  for rule_prefix, eol_product in rules.items():
-                      if group_id.startswith(rule_prefix):
-                          eol_mappings[group_id] = eol_product
-                          break
-              
-              # Summary
-              unique_eol_products = set(eol_mappings.values())
-              print(f"  📊 Created {len(eol_mappings)} mappings covering {len(unique_eol_products)} EOL products")
-              
-              return eol_mappings, dependency_groups
-          
-          # Create dynamic EOL mappings based on found dependencies
-          eol_mappings, dependency_groups = create_dynamic_eol_mappings(deps, eol_mapping_rules)
-          
-          # Exclude internal project modules
+          # Exclude internal project modules and prepare for mapping
           internal_prefixes_str = os.getenv('INTERNAL_PREFIXES', 'org.eclipse.ecsp')
           internal_prefixes = [prefix.strip() for prefix in internal_prefixes_str.split(',')]
-          
+          dependency_groups = {dep_info['groupId'] for dep_info in deps.values()}
+
           print(f"\n🔗 Mapping {len(deps)} dependencies to EOL products...")
           
           eol_deps = {}
@@ -313,6 +278,9 @@ jobs:
           mapped_count = 0
           skipped_count = 0
           
+          # Sort rules by key length descending to match most specific prefixes first
+          sorted_rules = sorted(eol_mapping_rules.items(), key=lambda item: len(item[0]), reverse=True)
+
           for dep_key, dep_info in deps.items():
               group_id = dep_info['groupId']
               
@@ -323,11 +291,20 @@ jobs:
                   skipped_count += 1
                   continue
               
-              # Try to map to an EOL product using the pre-computed mappings
-              eol_product = eol_mappings.get(group_id)
-
+              # Find the corresponding EOL product for the dependency
+              eol_product = None
+              # First, check for an exact match in the original rules
+              if group_id in eol_mapping_rules:
+                  eol_product = eol_mapping_rules[group_id]
+              else:
+                  # If no exact match, check for the longest matching prefix
+                  for rule_prefix, product in sorted_rules:
+                      if group_id.startswith(rule_prefix):
+                          eol_product = product
+                          break
+              
               if eol_product:
-                  # Handle multiple dependencies mapping to same EOL product
+                  # Handle multiple dependencies mapping to the same EOL product
                   # Keep the one with the most specific version or latest found
                   if eol_product not in eol_deps or len(dep_info['version']) > len(eol_deps[eol_product]['version']):
                       eol_deps[eol_product] = {
@@ -637,7 +614,7 @@ jobs:
             if results['supported']:
                 report.append("## ✅ Supported Dependencies")
                 report.append("<details>")
-                report.append("<summary>Click to expand untracked dependencies</summary>")
+                report.append("                report.append("<summary>Click to expand untracked dependencies</summary>")")
                 report.append("")
                 report.append("| Product | Version | Dependency | EOL Date | LTS |")
                 report.append("|---------|---------|------------|----------|-----|")
