@@ -614,7 +614,7 @@ jobs:
             if results['supported']:
                 report.append("## ✅ Supported Dependencies")
                 report.append("<details>")
-                report.append("                report.append("<summary>Click to expand untracked dependencies</summary>")")
+                report.append("<summary>Click to expand untracked dependencies</summary>")
                 report.append("")
                 report.append("| Product | Version | Dependency | EOL Date | LTS |")
                 report.append("|---------|---------|------------|----------|-----|")
