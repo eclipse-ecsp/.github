@@ -229,85 +229,89 @@ jobs:
           # Extract dependencies using Maven
           deps = extract_maven_dependencies()
           
+          # Load EOL mapping rules with a layered approach
+          print("🎯 Loading EOL mapping rules...")
+          eol_mapping_rules = {}
+          
+          # 1. Default mappings from the workflow repository
+          default_mapping_path = '.eol-workflow-repo/.github/eol-mapping.json'
+          try:
+              with open(default_mapping_path, 'r') as f:
+                  eol_mapping_rules.update(json.load(f))
+              print(f"  ✅ Loaded default EOL mapping rules from: {default_mapping_path}")
+          except FileNotFoundError:
+              print(f"  ℹ️  Default mapping file not found at '{default_mapping_path}'.")
+          except json.JSONDecodeError as e:
+              print(f"  ❌ Error parsing default mapping file '{default_mapping_path}': {e}")
+
+          # 2. Caller repository's mappings (overrides defaults)
+          caller_mapping_path = '.github/eol-mapping.json'
+          try:
+              with open(caller_mapping_path, 'r') as f:
+                  eol_mapping_rules.update(json.load(f))
+              print(f"  ✅ Loaded and merged EOL mapping rules from caller repository: {caller_mapping_path}")
+          except FileNotFoundError:
+              print(f"  ℹ️  Caller EOL mapping not found at '{caller_mapping_path}'. Using default or custom mappings only.")
+          except json.JSONDecodeError as e:
+              print(f"  ❌ Error parsing caller mapping file '{caller_mapping_path}': {e}")
+
+          # 3. Custom mappings from workflow input (highest precedence)
+          custom_mappings_str = os.getenv('CUSTOM_MAPPINGS', '')
+          if custom_mappings_str:
+              print("  ✅ Loading custom mappings from workflow input...")
+              try:
+                  custom_mappings = dict(item.split('=') for item in custom_mappings_str.split(','))
+                  eol_mapping_rules.update(custom_mappings)
+                  print("  ✅ Merged custom mappings.")
+              except ValueError:
+                  print(f"  ❌ Error: Invalid format for custom_mappings. Please use 'key=value,key2=value2'.")
+
           # Create dynamic EOL mappings based on actual dependencies found
-          def create_dynamic_eol_mappings(dependencies):
+          def create_dynamic_eol_mappings(dependencies, rules):
               """
               Dynamically create EOL product mappings based on the actual dependencies found.
               This analyzes dependency groupIds and creates targeted mappings for EOL tracking.
               """
-              print("🎯 Creating dynamic EOL mappings based on found dependencies...")
+              print("  Analyzing dependencies for EOL mapping...")
               
-              # Load EOL mapping rules from external file, with a fallback to the workflow's own mapping
-              eol_mapping_rules = {}
-              caller_mapping_path = '.github/eol-mapping.json'
-              default_mapping_path = '.eol-workflow-repo/.github/eol-mapping.json'
-              
-              try:
-                  # First, try to load from the caller repository
-                  with open(caller_mapping_path, 'r') as f:
-                      eol_mapping_rules = json.load(f)
-                  print(f"  ✅ Loaded EOL mapping rules from caller repository: {caller_mapping_path}")
-              except FileNotFoundError:
-                  # If not found, try to load the default from the checked-out workflow repo
-                  print(f"  ℹ️  Caller EOL mapping not found at '{caller_mapping_path}'. Falling back to default.")
-                  try:
-                      with open(default_mapping_path, 'r') as f:
-                          eol_mapping_rules = json.load(f)
-                      print(f"  ✅ Loaded default EOL mapping rules from: {default_mapping_path}")
-                  except FileNotFoundError:
-                      print("  ⚠️  Warning: Default eol-mapping.json not found. EOL mapping will be incomplete.")
-                  except json.JSONDecodeError as e:
-                      print(f"  ❌ Error parsing default mapping file '{default_mapping_path}': {e}")
-              except json.JSONDecodeError as e:
-                  print(f"  ❌ Error parsing caller mapping file '{caller_mapping_path}': {e}")
-
-
-              
-              # Analyze found dependencies and create targeted mappings
               eol_mappings = {}
               dependency_groups = set()
-              
-              print(f"  Analyzing {len(dependencies)} dependencies for EOL mapping...")
               
               for dep_key, dep_info in dependencies.items():
                   group_id = dep_info['groupId']
                   dependency_groups.add(group_id)
                   
                   # Check for exact matches first
-                  if group_id in eol_mapping_rules:
-                      eol_product = eol_mapping_rules[group_id]
+                  if group_id in rules:
+                      eol_product = rules[group_id]
                       eol_mappings[group_id] = eol_product
-                      print(f"    ✅ Direct match: {group_id} -> {eol_product}")
                       continue
                   
                   # Check for prefix matches (for sub-modules)
-                  matched = False
-                  for rule_prefix, eol_product in eol_mapping_rules.items():
+                  for rule_prefix, eol_product in rules.items():
                       if group_id.startswith(rule_prefix):
                           eol_mappings[group_id] = eol_product
-                          print(f"    📦 Prefix match: {group_id} -> {eol_product} (via {rule_prefix})")
-                          matched = True
                           break
-                  
-                  if not matched:
-                      print(f"    ❓ No EOL mapping found for: {group_id}")
               
               # Summary
               unique_eol_products = set(eol_mappings.values())
               print(f"  📊 Created {len(eol_mappings)} mappings covering {len(unique_eol_products)} EOL products")
-              print(f"  🎯 EOL products to track: {', '.join(sorted(unique_eol_products))}")
               
               return eol_mappings, dependency_groups
           
           # Create dynamic EOL mappings based on found dependencies
-          eol_mappings, dependency_groups = create_dynamic_eol_mappings(deps)
+          eol_mappings, dependency_groups = create_dynamic_eol_mappings(deps, eol_mapping_rules)
           
           # Exclude internal project modules
-          internal_prefixes = ['org.eclipse.ecsp']
+          internal_prefixes_str = os.getenv('INTERNAL_PREFIXES', 'org.eclipse.ecsp')
+          internal_prefixes = [prefix.strip() for prefix in internal_prefixes_str.split(',')]
           
           print(f"\n🔗 Mapping {len(deps)} dependencies to EOL products...")
           
+          eol_deps = {}
           unmapped_deps = []
+          mapped_count = 0
+          skipped_count = 0
           
           for dep_key, dep_info in deps.items():
               group_id = dep_info['groupId']
@@ -319,13 +323,8 @@ jobs:
                   skipped_count += 1
                   continue
               
-              # Try to map to an EOL product
+              # Try to map to an EOL product using the pre-computed mappings
               eol_product = eol_mappings.get(group_id)
-              if not eol_product:
-                  for rule_prefix, product in eol_mapping_rules.items():
-                      if group_id.startswith(rule_prefix):
-                          eol_product = product
-                          break
 
               if eol_product:
                   # Handle multiple dependencies mapping to same EOL product
@@ -336,7 +335,6 @@ jobs:
                           'dependency': dep_key,
                           'groupId': group_id
                       }
-                  print(f"  ✅ Mapped: {dep_key} -> {eol_product}")
                   mapped_count += 1
               else:
                   # Collect unmapped dependencies
@@ -377,9 +375,10 @@ jobs:
               'total_dependencies': len(deps),
               'internal_modules_skipped': skipped_count,
               'dependencies_mapped': mapped_count,
+              'dependencies_unmapped': len(unmapped_deps),
               'unique_eol_products': len(eol_deps),
               'dependency_groups_found': sorted(list(dependency_groups)),
-              'eol_mappings_used': len(eol_mappings)
+              'eol_mappings_used': len(eol_mapping_rules)
           }
           
           with open('dependency_analysis.json', 'w') as f:
