@@ -77,6 +77,8 @@ jobs:
       with:
         repository: eclipse-ecsp/.github
         path: ./.eol-workflow-repo
+        ref: eol-report
+
         
     - name: Build project
       run: |
