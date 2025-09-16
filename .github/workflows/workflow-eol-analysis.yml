@@ -82,7 +82,7 @@ jobs:
         
     - name: Build project
       run: |
-        ls .eol-workflow-repo
+        ls -a .eol-workflow-repo
         echo "Building multi-module project to resolve inter-module dependencies..."
         mvn clean install -Dmaven.test.skip=true ${{ inputs.maven_args }}
         
@@ -237,7 +237,7 @@ jobs:
           eol_mapping_rules = {}
           
           # 1. Default mappings from the workflow repository
-          default_mapping_path = '.eol-workflow-repo/eol-mapping.json'
+          default_mapping_path = '.eol-workflow-repo/.github/eol-mapping.json'
           try:
               with open(default_mapping_path, 'r') as f:
                   eol_mapping_rules.update(json.load(f))
