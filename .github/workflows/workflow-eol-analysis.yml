@@ -33,6 +33,11 @@ on:
         required: false
         default: ''
         type: string
+      custom_mappings:
+        description: 'Comma-separated list of custom EOL mappings (e.g., "com.my.group=my-product,org.another=product")'
+        required: false
+        default: ''
+        type: string
     outputs:
       eol_count:
         description: 'Number of EOL dependencies found'
@@ -67,18 +72,27 @@ jobs:
         distribution: ${{ inputs.java_distribution }}
         cache: maven
         
+    - name: Checkout EOL workflow repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.repository }}
+        path: ./.eol-workflow-repo
+        
     - name: Build project
       run: |
         echo "Building multi-module project to resolve inter-module dependencies..."
         mvn clean install -Dmaven.test.skip=true ${{ inputs.maven_args }}
         
     - name: Extract project dependencies
+      env:
+        CUSTOM_MAPPINGS: ${{ inputs.custom_mappings }}
       run: |
           python3 << 'EOF'
           import subprocess
           import json
           import re
           from datetime import datetime
+          import os
           
           def extract_maven_dependencies():
               """Extract dependencies using Maven dependency:list command"""
@@ -223,176 +237,31 @@ jobs:
               """
               print("🎯 Creating dynamic EOL mappings based on found dependencies...")
               
-              # Master EOL mapping rules - comprehensive database for potential matches
-              eol_mapping_rules = {
-                  # Spring Framework ecosystem
-                  'org.springframework.boot': 'spring-boot',
-                  'org.springframework': 'spring-framework',
-                  'org.springframework.cloud': 'spring-cloud',
-                  'org.springframework.data': 'spring-framework',
-                  'org.springframework.security': 'spring-framework',
-                  'org.springframework.integration': 'spring-framework',
-                  'org.springframework.batch': 'spring-framework',
-                  'org.springframework.webflow': 'spring-framework',
-                  
-                  # Jackson JSON processing
-                  'com.fasterxml.jackson.core': 'jackson',
-                  'com.fasterxml.jackson.dataformat': 'jackson',
-                  'com.fasterxml.jackson.datatype': 'jackson',
-                  'com.fasterxml.jackson.module': 'jackson',
-                  'com.fasterxml.jackson.jr': 'jackson',
-                  'com.fasterxml.jackson': 'jackson',
-                  
-                  # Database drivers and clients
-                  
-                  'com.h2database': 'h2',
-                  'org.hsqldb': 'hsqldb',
-                  'org.apache.derby': 'derby',
-                  'org.xerial': 'sqlite',
-                  
-                  # Web servers and networking
-                  'org.apache.tomcat': 'tomcat',
-                  'org.apache.tomcat.embed': 'tomcat',
-                  'org.eclipse.jetty': 'jetty',
-                  'io.undertow': 'undertow',
-                  'io.netty': 'netty',
-                  
-                  # Logging frameworks
-                  'ch.qos.logback': 'logback',
-                  'org.slf4j': 'slf4j',
-                  'org.apache.logging.log4j': 'log4j',
-                  'org.jboss.logging': 'jboss',
-                  'commons-logging': 'commons-logging',
-                  'log4j': 'log4j',
-                  
-                  # Testing frameworks
-                  'junit': 'junit',
-                  'org.junit.jupiter': 'junit',
-                  'org.junit.platform': 'junit',
-                  'org.junit': 'junit',
-                  'org.testng': 'testng',
-                  'org.mockito': 'mockito',
-                  'org.hamcrest': 'hamcrest',
-                  'org.assertj': 'assertj',
-                  'com.github.tomakehurst': 'wiremock',
-                  'org.testcontainers': 'testcontainers',
-                  'org.spockframework': 'spock',
-                  
-                  # Java/Jakarta EE and specifications
-                  'javax.servlet': 'java-ee',
-                  'javax.annotation': 'java-ee',
-                  'javax.validation': 'java-ee',
-                  'javax.xml.bind': 'java-ee',
-                  'javax.activation': 'java-ee',
-                  'jakarta.servlet': 'jakarta-ee',
-                  'jakarta.annotation': 'jakarta-ee',
-                  'jakarta.validation': 'jakarta-ee',
-                  'jakarta.xml.bind': 'jakarta-ee',
-                  'jakarta.activation': 'jakarta-ee',
-                  'jakarta.persistence': 'jakarta-ee',
-                  'org.eclipse.persistence': 'eclipselink',
-                  
-                  # API documentation and OpenAPI
-                  'io.swagger.core.v3': 'openapi',
-                  'io.swagger.v3': 'openapi',
-                  'org.springdoc': 'openapi',
-                  'org.openapi4j': 'openapi',
-                  'io.swagger': 'swagger',
-                  
-                  # Validation and ORM
-                  'org.hibernate.validator': 'hibernate',
-                  'org.hibernate': 'hibernate',
-                  'org.hibernate.orm': 'hibernate',
-                  'org.mybatis': 'mybatis',
-                  'com.querydsl': 'querydsl',
-                  'org.jooq': 'jooq',
-                  
-                  # Reactive programming
-                  'io.projectreactor': 'reactor',
-                  'io.projectreactor.netty': 'reactor',
-                  'io.projectreactor.addons': 'reactor',
-                  'org.reactivestreams': 'reactive-streams',
-                  'io.reactivex.rxjava3': 'rxjava',
-                  'io.reactivex.rxjava2': 'rxjava',
-                  'com.github.akarnokd': 'rxjava',
-                  
-                  # Metrics, monitoring and observability
-                  'io.micrometer': 'micrometer',
-                  'io.prometheus': 'prometheus',
-                  'io.zipkin.brave': 'brave',
-                  'io.jaegertracing': 'jaeger',
-                  'io.opentracing': 'opentracing',
-                  'io.opentelemetry': 'opentelemetry',
-                  
-                  # Resilience and fault tolerance
-                  'io.github.resilience4j': 'resilience4j',
-                  'com.netflix.hystrix': 'hystrix',
-                  'com.netflix.ribbon': 'ribbon',
-                  'com.netflix.eureka': 'eureka',
-                  
-                  # Security and cryptography
-                  'org.bouncycastle': 'bouncy-castle',
-                  'io.jsonwebtoken': 'jwt',
-                  'com.nimbusds': 'nimbus-jose-jwt',
-                  'org.springframework.security': 'spring-security',
-                  'org.apache.shiro': 'shiro',
-                  'org.keycloak': 'keycloak',
-                  
-                  # Serialization and data formats
-                  'org.yaml': 'snakeyaml',
-                  'com.google.code.gson': 'gson',
-                  'com.jayway.jsonpath': 'jsonpath',
-                  'com.fasterxml.woodstox': 'woodstox',
-                  'org.apache.avro': 'avro',
-                  'com.google.protobuf': 'protobuf',
-                  
-                  # Apache Commons and utilities
-                  'org.apache.commons': 'apache-commons',
-                  'commons-codec': 'apache-commons',
-                  'commons-fileupload': 'apache-commons',
-                  'commons-io': 'apache-commons',
-                  'commons-lang': 'apache-commons',
-                  'commons-lang3': 'apache-commons',
-                  'commons-collections': 'apache-commons',
-                  'commons-beanutils': 'apache-commons',
-                  
-                  # Google libraries
-                  'com.google.guava': 'guava',
-                  'com.google.inject': 'guice',
-                  'com.google.code.findbugs': 'findbugs',
-                  
-                  # Code manipulation and bytecode
-                  'org.aspectj': 'aspectj',
-                  'net.bytebuddy': 'byte-buddy',
-                  'org.javassist': 'javassist',
-                  'org.ow2.asm': 'asm',
-                  'cglib': 'cglib',
-                  
-                  # Caching libraries
-                  'com.github.ben-manes.caffeine': 'caffeine',
-                  'net.sf.ehcache': 'ehcache',
-                  'org.ehcache': 'ehcache',
-                  'com.hazelcast': 'hazelcast',
-                  
-                  # Build and development tools
-                  'org.projectlombok': 'lombok',
-                  'org.checkerframework': 'checker-framework',
-                  'org.mapstruct': 'mapstruct',
-                  'org.immutables': 'immutables',
-                  
-                  # Message brokers and messaging
-                  'org.apache.kafka': 'kafka',
-                  'org.apache.activemq': 'activemq',
-                  'com.rabbitmq': 'rabbitmq',
-                  'org.apache.qpid': 'qpid',
-                  
-                  # XML processing
-                  'org.dom4j': 'dom4j',
-                  'jdom': 'jdom',
-                  'org.jdom': 'jdom',
-                  'xalan': 'xalan',
-                  'xerces': 'xerces'
-              }
+              # Load EOL mapping rules from external file, with a fallback to the workflow's own mapping
+              eol_mapping_rules = {}
+              caller_mapping_path = '.github/eol-mapping.json'
+              default_mapping_path = '.eol-workflow-repo/.github/eol-mapping.json'
+              
+              try:
+                  # First, try to load from the caller repository
+                  with open(caller_mapping_path, 'r') as f:
+                      eol_mapping_rules = json.load(f)
+                  print(f"  ✅ Loaded EOL mapping rules from caller repository: {caller_mapping_path}")
+              except FileNotFoundError:
+                  # If not found, try to load the default from the checked-out workflow repo
+                  print(f"  ℹ️  Caller EOL mapping not found at '{caller_mapping_path}'. Falling back to default.")
+                  try:
+                      with open(default_mapping_path, 'r') as f:
+                          eol_mapping_rules = json.load(f)
+                      print(f"  ✅ Loaded default EOL mapping rules from: {default_mapping_path}")
+                  except FileNotFoundError:
+                      print("  ⚠️  Warning: Default eol-mapping.json not found. EOL mapping will be incomplete.")
+                  except json.JSONDecodeError as e:
+                      print(f"  ❌ Error parsing default mapping file '{default_mapping_path}': {e}")
+              except json.JSONDecodeError as e:
+                  print(f"  ❌ Error parsing caller mapping file '{caller_mapping_path}': {e}")
+
+
               
               # Analyze found dependencies and create targeted mappings
               eol_mappings = {}
@@ -438,9 +307,7 @@ jobs:
           
           print(f"\n🔗 Mapping {len(deps)} dependencies to EOL products...")
           
-          eol_deps = {}
-          mapped_count = 0
-          skipped_count = 0
+          unmapped_deps = []
           
           for dep_key, dep_info in deps.items():
               group_id = dep_info['groupId']
@@ -452,13 +319,15 @@ jobs:
                   skipped_count += 1
                   continue
               
-              # Map to EOL products using dynamic mappings
-              mapped = False
-              
-              # First try exact match
-              if group_id in eol_mappings:
-                  eol_product = eol_mappings[group_id]
-                  
+              # Try to map to an EOL product
+              eol_product = eol_mappings.get(group_id)
+              if not eol_product:
+                  for rule_prefix, product in eol_mapping_rules.items():
+                      if group_id.startswith(rule_prefix):
+                          eol_product = product
+                          break
+
+              if eol_product:
                   # Handle multiple dependencies mapping to same EOL product
                   # Keep the one with the most specific version or latest found
                   if eol_product not in eol_deps or len(dep_info['version']) > len(eol_deps[eol_product]['version']):
@@ -467,57 +336,36 @@ jobs:
                           'dependency': dep_key,
                           'groupId': group_id
                       }
-                  
-                  print(f"  ✅ Exact match: {dep_key} -> {eol_product}")
-                  mapped = True
+                  print(f"  ✅ Mapped: {dep_key} -> {eol_product}")
                   mapped_count += 1
               else:
-                  # Try prefix matching for sub-modules
-                  for mapping_group, eol_product in eol_mappings.items():
-                      if group_id.startswith(mapping_group):
-                          
-                          # Handle multiple dependencies mapping to same EOL product
-                          if eol_product not in eol_deps or len(dep_info['version']) > len(eol_deps[eol_product]['version']):
-                              eol_deps[eol_product] = {
-                                  'version': dep_info['version'],
-                                  'dependency': dep_key,
-                                  'groupId': group_id
-                              }
-                          
-                          print(f"  📦 Prefix match: {dep_key} -> {eol_product} (via {mapping_group})")
-                          mapped = True
-                          mapped_count += 1
-                          break
-              
-              if not mapped:
-                  print(f"  ❓ No EOL mapping: {dep_key}")
+                  # Collect unmapped dependencies
+                  print(f"  ❓ No EOL mapping for: {dep_key}")
+                  unmapped_deps.append({
+                      'product': group_id, # Use groupId as product for reporting
+                      'version': dep_info['version'],
+                      'dependency': dep_key,
+                      'reason': 'No mapping rule found for this groupId'
+                  })
           
           print(f"\n📊 Mapping Summary:")
           print(f"  Total dependencies: {len(deps)}")
           print(f"  Internal modules skipped: {skipped_count}")
           print(f"  Dependencies mapped: {mapped_count}")
-          print(f"  Unique EOL products: {len(eol_deps)}")
+          print(f"  Dependencies unmapped: {len(unmapped_deps)}")
+          print(f"  Unique EOL products to check: {len(eol_deps)}")
           
-          # Save results with enhanced metadata
-          eol_output = {}
-          for eol_product, info in eol_deps.items():
-              eol_output[eol_product] = {
-                  'version': info['version'],
-                  'dependency': info['dependency'],
-                  'groupId': info['groupId'],
-                  'mapped_at': datetime.now().isoformat()
-              }
-          
+          # Save mapped dependencies for EOL check
           with open('eol_dependencies.json', 'w') as f:
-              json.dump(eol_output, f, indent=2)
+              json.dump(eol_deps, f, indent=2)
+              
+          # Save unmapped dependencies to be added to the report later
+          with open('unmapped_dependencies.json', 'w') as f:
+              json.dump(unmapped_deps, f, indent=2)
           
           # Enhanced output
-          if not eol_deps:
-              print("\n❓ No dependencies mapped to trackable EOL products")
-              print("   This could mean:")
-              print("   - All dependencies are very new/unknown products")
-              print("   - Dependencies are mostly internal modules")
-              print("   - EOL mapping rules need expansion")
+          if not eol_deps and not unmapped_deps:
+              print("\n❓ No external dependencies found to analyze.")
           else:
               print(f"\n🎯 EOL-trackable dependencies ({len(eol_deps)} unique products):")
               for eol_product, info in sorted(eol_deps.items()):
@@ -669,7 +517,17 @@ jobs:
         # Run EOL check
         results = check_eol_status()
         
-        # Save results
+        # Load unmapped dependencies and add them to the 'unknown' list
+        try:
+            with open('unmapped_dependencies.json', 'r') as f:
+                unmapped = json.load(f)
+            if unmapped:
+                print(f"Adding {len(unmapped)} unmapped dependencies to the report.")
+                results['unknown'].extend(unmapped)
+        except FileNotFoundError:
+            pass # It's okay if this file doesn't exist
+            
+        # Save final results
         with open('eol_results.json', 'w') as f:
             json.dump(results, f, indent=2)
         
@@ -745,7 +603,7 @@ jobs:
             report.append(f"| ❌ EOL | {len(results['eol'])} | Dependencies that have reached end-of-life |")
             report.append(f"| ⚠️ Approaching EOL | {len(results['approaching_eol'])} | Dependencies approaching EOL within threshold |")
             report.append(f"| ✅ Supported | {len(results['supported'])} | Dependencies with active support |")
-            report.append(f"| ❓ Unknown | {len(results['unknown'])} | Dependencies not found in EOL database |")
+            report.append(f"| ❓ Untracked | {len(results['unknown'])} | Dependencies that could not be tracked |")
             report.append(f"| **Total** | **{total}** | **All checked dependencies** |")
             report.append("")
             
@@ -780,7 +638,7 @@ jobs:
             if results['supported']:
                 report.append("## ✅ Supported Dependencies")
                 report.append("<details>")
-                report.append("<summary>Click to expand supported dependencies</summary>")
+                report.append("                report.append("<summary>Click to expand untracked dependencies</summary>")")
                 report.append("")
                 report.append("| Product | Version | Dependency | EOL Date | LTS |")
                 report.append("|---------|---------|------------|----------|-----|")
@@ -794,11 +652,11 @@ jobs:
             
             # Unknown Dependencies
             if results['unknown']:
-                report.append("## ❓ Unknown Dependencies")
+                report.append("## ❓ Untracked Dependencies")
                 report.append("<details>")
-                report.append("<summary>Click to expand unknown dependencies</summary>")
+                report.append("<summary>Click to expand untracked dependencies</summary>")
                 report.append("")
-                report.append("These dependencies could not be checked against the EOL database:")
+                report.append("These dependencies could not be tracked, as they were not found in the EOL database:")
                 report.append("")
                 report.append("| Product | Version | Dependency | Reason |")
                 report.append("|---------|---------|------------|--------|")

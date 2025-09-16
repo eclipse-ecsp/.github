@@ -167,6 +167,7 @@ jobs:
       java_distribution: 'zulu'
       internal_prefixes: 'org.eclipse.ecsp' # to exclude the internal dependency checking with eol db
       maven_args: ''
+      custom_mappings: 'org.liquibase=liquibase'
 ```
 
 #### Inputs
@@ -179,6 +180,8 @@ jobs:
 | `java_distribution` | Java distribution to use | No | `zulu` |
 | `internal_prefixes` | Comma-separated list of internal package prefixes to exclude | No | `org.eclipse.ecsp` |
 | `maven_args` | Additional Maven arguments | No | `''` |
+| `custom_mappings` | Comma-separated list of custom EOL mappings (e.g., "com.my.group=my-product") | No | `''` |
+
 
 #### Outputs
 
@@ -194,7 +197,7 @@ The workflow generates the following artifacts:
 - `eol_report.md`: Detailed Markdown report of all dependencies and their EOL status
 - `eol_results.json`: Raw JSON data of the EOL analysis results
 - `eol_dependencies.json`: Mapped dependencies with their EOL products
-- `dependency_analysis.json`: Metadata about the dependency analysis
+- `dependency_analysis.json`: Metadata about the dependency analysis, including untracked dependencies.
 
 #### Using Workflow Outputs
 ```yaml
