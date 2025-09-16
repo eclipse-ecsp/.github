@@ -22,6 +22,12 @@ This repository contains reusable GitHub Actions workflows for Java projects, es
 - **workflow-dependencies-update.yml**  
   Automatically updates the `DEPENDENCIES` file using Eclipse Dash and creates a pull request if changes are detected.
 
+- **workflow-eol-analysis.yml**
+  It helps identify dependencies that are either EOL or approaching their end-of-life date.
+  * creates a pull request if any eol dependencies are found(only schedule run).
+  * create workflow summary with eol details
+  * comment on the pr with eol report if the workflow event is pull_request
+
 ## Actions
 
 - **import-gpg-key**  
@@ -138,7 +144,74 @@ jobs:
       pull-requests: write
       contents: read
 ```
+---
+### EOL Analysis
 
+```yaml
+name: Check Dependencies EOL Status
+on:
+  schedule:
+    - cron: '0 11 * * 1'  # Weekly on Mondays at 11:00 UTC
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+
+jobs:
+  check-dependencies:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-eol-analysis.yml@main
+    with:
+      # Optional parameters - shown with their default values
+      fail_on_eol: false # # Will fail the workflow if EOL dependencies are found
+      days_threshold: '90' # artifacts retention time
+      java_version: '17'
+      java_distribution: 'zulu'
+      internal_prefixes: 'org.eclipse.ecsp' # to exclude the internal dependency checking with eol db
+      maven_args: ''
+```
+
+#### Inputs
+
+| Input | Description | Required | Default |
+|-------|-------------|----------|---------|
+| `fail_on_eol` | Fail the workflow if EOL dependencies are found | No | `false` |
+| `days_threshold` | Number of days before EOL to start alerting | No | `90` |
+| `java_version` | Java version to use | No | `17` |
+| `java_distribution` | Java distribution to use | No | `zulu` |
+| `internal_prefixes` | Comma-separated list of internal package prefixes to exclude | No | `org.eclipse.ecsp` |
+| `maven_args` | Additional Maven arguments | No | `''` |
+
+#### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `eol-count` | Number of EOL dependencies found |
+| `approaching-count` | Number of dependencies approaching EOL |
+| `total-issues` | Total number of EOL-related issues |
+#### Generated EOL Reports
+
+The workflow generates the following artifacts:
+
+- `eol_report.md`: Detailed Markdown report of all dependencies and their EOL status
+- `eol_results.json`: Raw JSON data of the EOL analysis results
+- `eol_dependencies.json`: Mapped dependencies with their EOL products
+- `dependency_analysis.json`: Metadata about the dependency analysis
+
+#### Using Workflow Outputs
+```yaml
+jobs:
+  check-dependencies:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-eol-analysis.yml@main
+    
+  process-results:
+    needs: check-dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check EOL counts
+        run: |
+          echo "Found ${{ needs.check-dependencies.outputs.eol-count }} EOL dependencies"
+          echo "Found ${{ needs.check-dependencies.outputs.approaching-count }} dependencies approaching EOL"
+```
+---
 ## Requirements
 
 - Java 17+ (configurable)
