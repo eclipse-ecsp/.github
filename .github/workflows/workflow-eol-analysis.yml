@@ -795,6 +795,9 @@ jobs:
             # Unknown Dependencies
             if results['unknown']:
                 report.append("## ❓ Unknown Dependencies")
+                report.append("<details>")
+                report.append("<summary>Click to expand unknown dependencies</summary>")
+                report.append("")
                 report.append("These dependencies could not be checked against the EOL database:")
                 report.append("")
                 report.append("| Product | Version | Dependency | Reason |")
@@ -802,6 +805,8 @@ jobs:
                 for dep in results['unknown']:
                     reason = dep.get('reason', 'Unknown')
                     report.append(f"| {dep['product']} | {dep['version']} | `{dep['dependency']}` | {reason} |")
+                report.append("")
+                report.append("</details>")
                 report.append("")
             
             # Recommendations
