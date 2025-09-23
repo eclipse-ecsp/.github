@@ -1,0 +1,754 @@
+name: EOL Dependencies Analysis
+
+on:
+  workflow_call:
+    inputs:
+      fail_on_eol:
+        description: 'Fail the workflow if EOL dependencies are found'
+        required: false
+        default: false
+        type: boolean
+      days_threshold:
+        description: 'Alert threshold in days before EOL'
+        required: false
+        default: '90'
+        type: string
+      java_version:
+        description: 'Java version to use'
+        required: false
+        default: '17'
+        type: string
+      java_distribution:
+        description: 'Java distribution to use'
+        required: false
+        default: 'zulu'
+        type: string
+      internal_prefixes:
+        description: 'Comma-separated list of internal package prefixes to exclude'
+        required: false
+        default: 'org.eclipse.ecsp'
+        type: string
+      maven_args:
+        description: 'Additional Maven arguments'
+        required: false
+        default: ''
+        type: string
+      custom_mappings:
+        description: 'Comma-separated list of custom EOL mappings (e.g., "com.my.group=my-product,org.another=product")'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      eol_count:
+        description: 'Number of EOL dependencies found'
+        value: ${{ jobs.eol-check.outputs.eol-count }}
+      approaching_count:
+        description: 'Number of dependencies approaching EOL'
+        value: ${{ jobs.eol-check.outputs.approaching-count }}
+      total_issues:
+        description: 'Total number of EOL-related issues'
+        value: ${{ jobs.eol-check.outputs.total-issues }}
+
+env:
+  MAVEN_OPTS: -Dhttp.keepAlive=false -Dmaven.wagon.http.pool=false
+
+jobs:
+  eol-check:
+    runs-on: ubuntu-latest
+    name: Check Dependencies EOL Status
+    outputs:
+      eol-count: ${{ steps.eol-check.outputs.eol-count }}
+      approaching-count: ${{ steps.eol-check.outputs.approaching-count }}
+      total-issues: ${{ steps.eol-check.outputs.total-issues }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: ${{ inputs.java_version }}
+        distribution: ${{ inputs.java_distribution }}
+        cache: maven
+        
+    - name: Checkout EOL workflow repository
+      uses: actions/checkout@v4
+      with:
+        repository: eclipse-ecsp/.github
+        path: ./.eol-workflow-repo
+        ref: eol-report
+
+        
+    - name: Build project
+      run: |
+        ls -a .eol-workflow-repo
+        echo "Building multi-module project to resolve inter-module dependencies..."
+        mvn clean install -Dmaven.test.skip=true ${{ inputs.maven_args }}
+        
+    - name: Extract project dependencies
+      env:
+        CUSTOM_MAPPINGS: ${{ inputs.custom_mappings }}
+      run: |
+          python3 << 'EOF'
+          import subprocess
+          import json
+          import re
+          from datetime import datetime
+          import os
+          
+          def extract_maven_dependencies():
+              """Extract dependencies using Maven dependency:list command"""
+              print("🔍 Extracting dependencies using Maven...")
+              
+              dependencies = {}
+              
+              try:
+                  # Try to resolve dependencies first to handle multi-module projects
+                  print("  Pre-resolving dependencies for multi-module project...")
+                  resolve_result = subprocess.run([
+                      'mvn', 'dependency:resolve'
+                  ], capture_output=True, text=True, cwd='.')
+                  
+                  if resolve_result.returncode != 0:
+                      print(f"⚠️  Maven dependency:resolve had issues: {resolve_result.stderr}")
+                      # Continue anyway as this might still work
+                  
+                  # Get all dependencies using Maven dependency:list for all modules
+                  # This includes all resolved transitive dependencies with actual versions
+                  print("  Running Maven dependency:list for all modules...")
+                  result = subprocess.run([
+                      'mvn', 'dependency:list', '-DexcludeTransitive=false'
+                  ], capture_output=True, text=True, cwd='.')
+                  
+                  if result.returncode != 0:
+                      print(f"❌ Maven dependency:list failed:")
+                      print(f"   Return code: {result.returncode}")
+                      print(f"   stderr: {result.stderr}")
+                      print(f"   stdout: {result.stdout}")
+                      
+                      # Try alternative approach: use dependency:tree instead
+                      print("  Trying alternative approach with dependency:tree...")
+                      tree_result = subprocess.run([
+                          'mvn', 'dependency:tree', '-DoutputType=text'
+                      ], capture_output=True, text=True, cwd='.')
+                      
+                      if tree_result.returncode == 0:
+                          print("  ✅ Using dependency:tree output as fallback")
+                          result = tree_result
+                      else:
+                          print(f"❌ dependency:tree also failed: {tree_result.stderr}")
+                          return dependencies
+                  
+                  print(f"✅ Maven dependency:list completed successfully")
+                  
+                  # Extract module information from Maven output
+                  modules_processed = []
+                  for line in result.stdout.splitlines():
+                      if 'Building ' in line and '[' in line and '/' in line:
+                          # Extract module name from "Building module-name version [x/y]"
+                          parts = line.split('Building')[1].strip().split('[')[0].strip()
+                          module_name = parts.split()[0] if parts else 'unknown'
+                          modules_processed.append(module_name)
+                  
+                  if modules_processed:
+                      print(f"  📋 Modules processed: {', '.join(modules_processed)}")
+                  
+                  # Parse Maven output to extract dependency information
+                  # Format: [INFO]    groupId:artifactId:type:version:scope -- module info
+                  dependency_count = 0
+                  
+                  for line in result.stdout.splitlines():
+                      line = line.strip()
+                      
+                      # Look for dependency lines from both dependency:list and dependency:tree
+                      # dependency:list format: [INFO]    groupId:artifactId:type:version:scope -- module info
+                      # dependency:tree format: [INFO] +- groupId:artifactId:type:version:scope
+                      is_dependency_list = line.startswith('[INFO]    ') and ':' in line and not line.startswith('[INFO]    none')
+                      is_dependency_tree = (line.startswith('[INFO] ') and 
+                                           any(prefix in line for prefix in ['+- ', '\\- ', '|  ']) and 
+                                           ':' in line)
+                      
+                      if is_dependency_list or is_dependency_tree:
+                          # Parse based on format
+                          if is_dependency_list:
+                              # Remove the [INFO] prefix and any trailing module info
+                              dependency_info = line.replace('[INFO]    ', '').strip()
+                              # Split by '--' to get just the dependency part (before module info)
+                              if '--' in dependency_info:
+                                  dependency_info = dependency_info.split('--')[0].strip()
+                          else:  # is_dependency_tree
+                              # Remove [INFO] prefix and tree characters
+                              dependency_info = line.replace('[INFO] ', '').strip()
+                              # Remove tree prefixes like '+- ', '\\- ', '|  '
+                              for prefix in ['+- ', '\\- ', '|  +- ', '|  \\- ', '   ']:
+                                  if dependency_info.startswith(prefix):
+                                      dependency_info = dependency_info[len(prefix):].strip()
+                                      break
+                          
+                          # Parse dependency format: groupId:artifactId:type:version:scope
+                          parts = dependency_info.split(':')
+                          if len(parts) >= 4:  # At minimum we need groupId:artifactId:type:version
+                              try:
+                                  group_id = parts[0].strip()
+                                  artifact_id = parts[1].strip()
+                                  packaging = parts[2].strip() if len(parts) > 2 else 'jar'
+                                  version = parts[3].strip() if len(parts) > 3 else 'unknown'
+                                  scope = parts[4].strip() if len(parts) > 4 else 'compile'
+                                  
+                                  # Skip empty or malformed entries
+                                  if not group_id or not artifact_id or group_id == 'none':
+                                      continue
+                                  
+                                  # Only include compile and runtime dependencies (skip test, provided)
+                                  if scope.lower() in ['test', 'provided']:
+                                      continue
+                                  
+                                  # Create dependency key
+                                  dep_key = f"{group_id}:{artifact_id}"
+                                  
+                                  # Store dependency information (avoid duplicates)
+                                  if dep_key not in dependencies:
+                                      dependencies[dep_key] = {
+                                          'groupId': group_id,
+                                          'artifactId': artifact_id,
+                                          'version': version,
+                                          'packaging': packaging,
+                                          'scope': scope
+                                      }
+                                      dependency_count += 1
+                                  
+                              except (IndexError, ValueError) as e:
+                                  print(f"⚠️  Could not parse dependency line: {dependency_info} - {e}")
+                                  continue
+                  
+                  print(f"📦 Found {dependency_count} dependencies from Maven")
+                  
+              except Exception as e:
+                  print(f"❌ Error running Maven dependency command: {e}")
+              
+              return dependencies
+          
+          # Extract dependencies using Maven
+          deps = extract_maven_dependencies()
+          
+          # Load EOL mapping rules with a layered approach
+          print("🎯 Loading EOL mapping rules...")
+          eol_mapping_rules = {}
+          
+          # 1. Default mappings from the workflow repository
+          default_mapping_path = '.eol-workflow-repo/.github/eol-mapping.json'
+          try:
+              with open(default_mapping_path, 'r') as f:
+                  eol_mapping_rules.update(json.load(f))
+              print(f"  ✅ Loaded default EOL mapping rules from: {default_mapping_path}")
+          except FileNotFoundError:
+              print(f"  ℹ️  Default mapping file not found at '{default_mapping_path}'.")
+          except json.JSONDecodeError as e:
+              print(f"  ❌ Error parsing default mapping file '{default_mapping_path}': {e}")
+
+          # 2. Caller repository's mappings (overrides defaults)
+          caller_mapping_path = '.github/eol-mapping.json'
+          try:
+              with open(caller_mapping_path, 'r') as f:
+                  eol_mapping_rules.update(json.load(f))
+              print(f"  ✅ Loaded and merged EOL mapping rules from caller repository: {caller_mapping_path}")
+          except FileNotFoundError:
+              print(f"  ℹ️  Caller EOL mapping not found at '{caller_mapping_path}'. Using default or custom mappings only.")
+          except json.JSONDecodeError as e:
+              print(f"  ❌ Error parsing caller mapping file '{caller_mapping_path}': {e}")
+
+          # 3. Custom mappings from workflow input (highest precedence)
+          custom_mappings_str = os.getenv('CUSTOM_MAPPINGS', '')
+          if custom_mappings_str:
+              print("  ✅ Loading custom mappings from workflow input...")
+              try:
+                  custom_mappings = dict(item.split('=') for item in custom_mappings_str.split(','))
+                  eol_mapping_rules.update(custom_mappings)
+                  print("  ✅ Merged custom mappings.")
+              except ValueError:
+                  print(f"  ❌ Error: Invalid format for custom_mappings. Please use 'key=value,key2=value2'.")
+
+          # Exclude internal project modules and prepare for mapping
+          internal_prefixes_str = os.getenv('INTERNAL_PREFIXES', 'org.eclipse.ecsp')
+          internal_prefixes = [prefix.strip() for prefix in internal_prefixes_str.split(',')]
+          dependency_groups = {dep_info['groupId'] for dep_info in deps.values()}
+
+          print(f"\n🔗 Mapping {len(deps)} dependencies to EOL products...")
+          
+          eol_deps = {}
+          unmapped_deps = []
+          mapped_count = 0
+          skipped_count = 0
+          
+          # Sort rules by key length descending to match most specific prefixes first
+          sorted_rules = sorted(eol_mapping_rules.items(), key=lambda item: len(item[0]), reverse=True)
+
+          for dep_key, dep_info in deps.items():
+              group_id = dep_info['groupId']
+              
+              # Skip internal project modules
+              is_internal = any(group_id.startswith(prefix) for prefix in internal_prefixes)
+              if is_internal:
+                  print(f"  ⏭️  Skipping internal module: {dep_key}")
+                  skipped_count += 1
+                  continue
+              
+              # Find the corresponding EOL product for the dependency
+              eol_product = None
+              # First, check for an exact match in the original rules
+              if group_id in eol_mapping_rules:
+                  eol_product = eol_mapping_rules[group_id]
+              else:
+                  # If no exact match, check for the longest matching prefix
+                  for rule_prefix, product in sorted_rules:
+                      if group_id.startswith(rule_prefix):
+                          eol_product = product
+                          break
+              
+              if eol_product:
+                  # Handle multiple dependencies mapping to the same EOL product
+                  # Keep the one with the most specific version or latest found
+                  if eol_product not in eol_deps or len(dep_info['version']) > len(eol_deps[eol_product]['version']):
+                      eol_deps[eol_product] = {
+                          'version': dep_info['version'],
+                          'dependency': dep_key,
+                          'groupId': group_id
+                      }
+                  mapped_count += 1
+              else:
+                  # Collect unmapped dependencies
+                  print(f"  ❓ No EOL mapping for: {dep_key}")
+                  unmapped_deps.append({
+                      'product': group_id, # Use groupId as product for reporting
+                      'version': dep_info['version'],
+                      'dependency': dep_key,
+                      'reason': 'No mapping rule found for this groupId'
+                  })
+          
+          print(f"\n📊 Mapping Summary:")
+          print(f"  Total dependencies: {len(deps)}")
+          print(f"  Internal modules skipped: {skipped_count}")
+          print(f"  Dependencies mapped: {mapped_count}")
+          print(f"  Dependencies unmapped: {len(unmapped_deps)}")
+          print(f"  Unique EOL products to check: {len(eol_deps)}")
+          
+          # Save mapped dependencies for EOL check
+          with open('eol_dependencies.json', 'w') as f:
+              json.dump(eol_deps, f, indent=2)
+              
+          # Save unmapped dependencies to be added to the report later
+          with open('unmapped_dependencies.json', 'w') as f:
+              json.dump(unmapped_deps, f, indent=2)
+          
+          # Enhanced output
+          if not eol_deps and not unmapped_deps:
+              print("\n❓ No external dependencies found to analyze.")
+          else:
+              print(f"\n🎯 EOL-trackable dependencies ({len(eol_deps)} unique products):")
+              for eol_product, info in sorted(eol_deps.items()):
+                  print(f"  📦 {eol_product}: {info['version']} (from {info['dependency']})")
+          
+          # Save dependency analysis metadata
+          analysis_metadata = {
+              'analysis_date': datetime.now().isoformat(),
+              'total_dependencies': len(deps),
+              'internal_modules_skipped': skipped_count,
+              'dependencies_mapped': mapped_count,
+              'dependencies_unmapped': len(unmapped_deps),
+              'unique_eol_products': len(eol_deps),
+              'dependency_groups_found': sorted(list(dependency_groups)),
+              'eol_mappings_used': len(eol_mapping_rules)
+          }
+          
+          with open('dependency_analysis.json', 'w') as f:
+              json.dump(analysis_metadata, f, indent=2)
+          EOF
+          
+    - name: Check EOL status for dependencies
+      id: eol-check
+      run: |
+        echo "Checking EOL status using endoflife.date API..."
+        
+        # Set threshold days (default 90 days)
+        THRESHOLD_DAYS="${{ inputs.days_threshold }}"
+        
+        cat > check_eol.py << 'EOF'
+        import json
+        import requests
+        import sys
+        from datetime import datetime, timedelta
+        import os
+        
+        def check_eol_status():
+            threshold_days = int(os.getenv('THRESHOLD_DAYS', '90'))
+            today = datetime.now()
+            threshold_date = today + timedelta(days=threshold_days)
+            
+            with open('eol_dependencies.json', 'r') as f:
+                dependencies = json.load(f)
+            
+            results = {
+                'eol': [],
+                'approaching_eol': [],
+                'supported': [],
+                'unknown': []
+            }
+            
+            for product, info in dependencies.items():
+                try:
+                    print(f"Checking {product}...")
+                    
+                    # Get product info from endoflife.date API
+                    response = requests.get(f'https://endoflife.date/api/{product}.json', timeout=10)
+                    
+                    if response.status_code != 200:
+                        print(f"  Product {product} not found in EOL database")
+                        results['unknown'].append({
+                            'product': product,
+                            'version': info['version'],
+                            'dependency': info['dependency'],
+                            'reason': 'Product not found in EOL database'
+                        })
+                        continue
+                    
+                    cycles = response.json()
+                    current_version = info['version']
+                    
+                    # Find matching version or closest version
+                    matching_cycle = None
+                    for cycle in cycles:
+                        cycle_version = str(cycle.get('cycle', ''))
+                        
+                        # Direct match
+                        if current_version.startswith(cycle_version):
+                            matching_cycle = cycle
+                            break
+                        
+                        # Semantic version match (e.g., 2.7.x matches 2.7)
+                        if current_version.split('.')[0] == cycle_version.split('.')[0]:
+                            if len(cycle_version.split('.')) >= 2 and len(current_version.split('.')) >= 2:
+                                if current_version.split('.')[1] == cycle_version.split('.')[1]:
+                                    matching_cycle = cycle
+                                    break
+                    
+                    if not matching_cycle:
+                        # Use the first (latest) cycle as fallback
+                        matching_cycle = cycles[0] if cycles else None
+                    
+                    if not matching_cycle:
+                        results['unknown'].append({
+                            'product': product,
+                            'version': current_version,
+                            'dependency': info['dependency'],
+                            'reason': 'No matching version cycle found'
+                        })
+                        continue
+                    
+                    eol_date = matching_cycle.get('eol')
+                    support_date = matching_cycle.get('support')
+                    lts = matching_cycle.get('lts', False)
+                    
+                    # Parse EOL date
+                    eol_datetime = None
+                    if eol_date and eol_date != True and eol_date != False:
+                        try:
+                            eol_datetime = datetime.strptime(str(eol_date), '%Y-%m-%d')
+                        except:
+                            pass
+                    
+                    # Check status
+                    status_info = {
+                        'product': product,
+                        'version': current_version,
+                        'dependency': info['dependency'],
+                        'cycle': matching_cycle.get('cycle'),
+                        'eol_date': eol_date,
+                        'support_date': support_date,
+                        'lts': lts
+                    }
+                    
+                    if eol_date == True:
+                        results['eol'].append(status_info)
+                        print(f"  ❌ {product} {current_version} is EOL")
+                    elif eol_datetime and eol_datetime <= today:
+                        results['eol'].append(status_info)
+                        print(f"  ❌ {product} {current_version} is EOL (since {eol_date})")
+                    elif eol_datetime and eol_datetime <= threshold_date:
+                        status_info['days_until_eol'] = (eol_datetime - today).days
+                        results['approaching_eol'].append(status_info)
+                        print(f"  ⚠️  {product} {current_version} approaching EOL ({eol_date})")
+                    else:
+                        results['supported'].append(status_info)
+                        print(f"  ✅ {product} {current_version} is supported")
+                        
+                except Exception as e:
+                    print(f"  Error checking {product}: {e}")
+                    results['unknown'].append({
+                        'product': product,
+                        'version': info['version'],
+                        'dependency': info['dependency'],
+                        'reason': f'Error: {str(e)}'
+                    })
+            
+            return results
+        
+        # Run EOL check
+        results = check_eol_status()
+        
+        # Load unmapped dependencies and add them to the 'unknown' list
+        try:
+            with open('unmapped_dependencies.json', 'r') as f:
+                unmapped = json.load(f)
+            if unmapped:
+                print(f"Adding {len(unmapped)} unmapped dependencies to the report.")
+                results['unknown'].extend(unmapped)
+        except FileNotFoundError:
+            pass # It's okay if this file doesn't exist
+            
+        # Save final results
+        with open('eol_results.json', 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        # Output summary
+        total_checked = len(results['eol']) + len(results['approaching_eol']) + len(results['supported']) + len(results['unknown'])
+        print(f"\n📊 EOL Check Summary:")
+        print(f"Total dependencies checked: {total_checked}")
+        print(f"❌ EOL: {len(results['eol'])}")
+        print(f"⚠️  Approaching EOL: {len(results['approaching_eol'])}")
+        print(f"✅ Supported: {len(results['supported'])}")
+        print(f"❓ Unknown: {len(results['unknown'])}")
+        
+        # Set outputs for GitHub Actions
+        eol_count = len(results['eol'])
+        approaching_count = len(results['approaching_eol'])
+        
+        print(f"EOL_COUNT={eol_count}")
+        print(f"APPROACHING_COUNT={approaching_count}")
+        print(f"TOTAL_ISSUES={eol_count + approaching_count}")
+        EOF
+        
+        # Check if we have dependencies to analyze
+        if [ -f eol_dependencies.json ] && [ -s eol_dependencies.json ]; then
+          # Set environment variable and run the Python script
+          THRESHOLD_DAYS="$THRESHOLD_DAYS" python3 check_eol.py
+          
+          # Set GitHub environment variables from Python output
+          EOL_COUNT=$(python3 -c 'import json; f=open("eol_results.json"); r=json.load(f); f.close(); print(len(r["eol"]))' 2>/dev/null || echo 0)
+          APPROACHING_COUNT=$(python3 -c 'import json; f=open("eol_results.json"); r=json.load(f); f.close(); print(len(r["approaching_eol"]))' 2>/dev/null || echo 0)
+        else
+          echo "No dependencies found to check - creating empty results"
+          EOL_COUNT=0
+          APPROACHING_COUNT=0
+          
+          # Create empty results file
+          echo '{"eol":[],"approaching_eol":[],"supported":[],"unknown":[]}' > eol_results.json
+        fi
+        
+        TOTAL_ISSUES=$((EOL_COUNT + APPROACHING_COUNT))
+        
+        echo "EOL_COUNT=$EOL_COUNT" >> $GITHUB_ENV
+        echo "APPROACHING_COUNT=$APPROACHING_COUNT" >> $GITHUB_ENV
+        echo "TOTAL_ISSUES=$TOTAL_ISSUES" >> $GITHUB_ENV
+        
+        # Also set step outputs for conditional logic
+        echo "eol-count=$EOL_COUNT" >> $GITHUB_OUTPUT
+        echo "approaching-count=$APPROACHING_COUNT" >> $GITHUB_OUTPUT
+        echo "total-issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
+        
+    - name: Generate EOL Report
+      id: generate-report
+      run: |
+        echo "Generating detailed EOL report..."
+        
+        cat > generate_report.py << 'EOF'
+        import json
+        from datetime import datetime
+        
+        def generate_markdown_report():
+            with open('eol_results.json', 'r') as f:
+                results = json.load(f)
+            
+            report = []
+            report.append("# 🔍 Dependencies End-of-Life Report")
+            report.append(f"*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}*")
+            report.append("")
+            
+            # Summary
+            total = len(results['eol']) + len(results['approaching_eol']) + len(results['supported']) + len(results['unknown'])
+            report.append("## 📊 Summary")
+            report.append("| Status | Count | Description |")
+            report.append("|--------|--------|-------------|")
+            report.append(f"| ❌ EOL | {len(results['eol'])} | Dependencies that have reached end-of-life |")
+            report.append(f"| ⚠️ Approaching EOL | {len(results['approaching_eol'])} | Dependencies approaching EOL within threshold |")
+            report.append(f"| ✅ Supported | {len(results['supported'])} | Dependencies with active support |")
+            report.append(f"| ❓ Untracked | {len(results['unknown'])} | Dependencies that could not be tracked |")
+            report.append(f"| **Total** | **{total}** | **All checked dependencies** |")
+            report.append("")
+            
+            # EOL Dependencies
+            if results['eol']:
+                report.append("## ❌ End-of-Life Dependencies")
+                report.append("These dependencies have reached their end-of-life and should be updated immediately:")
+                report.append("")
+                report.append("| Product | Version | Dependency | EOL Date | LTS |")
+                report.append("|---------|---------|------------|----------|-----|")
+                for dep in results['eol']:
+                    lts_badge = "✅" if dep.get('lts') else "❌"
+                    eol_date = dep.get('eol_date', 'Unknown')
+                    report.append(f"| {dep['product']} | {dep['version']} | `{dep['dependency']}` | {eol_date} | {lts_badge} |")
+                report.append("")
+            
+            # Approaching EOL
+            if results['approaching_eol']:
+                report.append("## ⚠️ Dependencies Approaching EOL")
+                report.append("These dependencies will reach end-of-life soon:")
+                report.append("")
+                report.append("| Product | Version | Dependency | EOL Date | Days Until EOL | LTS |")
+                report.append("|---------|---------|------------|----------|----------------|-----|")
+                for dep in results['approaching_eol']:
+                    lts_badge = "✅" if dep.get('lts') else "❌"
+                    days_until = dep.get('days_until_eol', 'Unknown')
+                    eol_date = dep.get('eol_date', 'Unknown')
+                    report.append(f"| {dep['product']} | {dep['version']} | `{dep['dependency']}` | {eol_date} | {days_until} | {lts_badge} |")
+                report.append("")
+            
+            # Supported Dependencies
+            if results['supported']:
+                report.append("## ✅ Supported Dependencies")
+                report.append("<details>")
+                report.append("<summary>Click to expand untracked dependencies</summary>")
+                report.append("")
+                report.append("| Product | Version | Dependency | EOL Date | LTS |")
+                report.append("|---------|---------|------------|----------|-----|")
+                for dep in results['supported']:
+                    lts_badge = "✅" if dep.get('lts') else "❌"
+                    eol_date = dep.get('eol_date', 'Future')
+                    report.append(f"| {dep['product']} | {dep['version']} | `{dep['dependency']}` | {eol_date} | {lts_badge} |")
+                report.append("")
+                report.append("</details>")
+                report.append("")
+            
+            # Unknown Dependencies
+            if results['unknown']:
+                report.append("## ❓ Untracked Dependencies")
+                report.append("<details>")
+                report.append("<summary>Click to expand untracked dependencies</summary>")
+                report.append("")
+                report.append("These dependencies could not be tracked, as they were not found in the EOL database:")
+                report.append("")
+                report.append("| Product | Version | Dependency | Reason |")
+                report.append("|---------|---------|------------|--------|")
+                for dep in results['unknown']:
+                    reason = dep.get('reason', 'Unknown')
+                    report.append(f"| {dep['product']} | {dep['version']} | `{dep['dependency']}` | {reason} |")
+                report.append("")
+                report.append("</details>")
+                report.append("")
+            
+            # Recommendations
+            report.append("## 🔧 Recommendations")
+            if results['eol']:
+                report.append("### Immediate Action Required")
+                report.append("- Update all EOL dependencies to supported versions")
+                report.append("- Check for security vulnerabilities in EOL dependencies")
+                report.append("- Plan migration timeline for breaking changes")
+            
+            if results['approaching_eol']:
+                report.append("### Plan for Updates")
+                report.append("- Schedule updates for dependencies approaching EOL")
+                report.append("- Test compatibility with newer versions")
+                report.append("- Monitor release schedules for dependency updates")
+            
+            report.append("")
+            report.append("### Useful Resources")
+            report.append("- [endoflife.date](https://endoflife.date/) - EOL information database")
+            
+            return "\n".join(report)
+        
+        # Generate report
+        markdown_report = generate_markdown_report()
+        
+        # Save report
+        with open('eol_report.md', 'w') as f:
+            f.write(markdown_report)
+        
+        print("Report generated successfully!")
+        EOF
+        
+        python3 generate_report.py
+        
+    - name: Upload EOL Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: eol-report
+        path: |
+          eol_report.md
+          eol_results.json
+          eol_dependencies.json
+          dependency_analysis.json
+        retention-days: 30
+        
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('eol_report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🔍 EOL Dependencies Check Results\n\n${report}`
+          });
+          
+    - name: Create Issue for EOL Dependencies
+      if: steps.eol-check.outputs.eol-count != '0' && github.event_name == 'schedule'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('eol_report.md', 'utf8');
+          
+          // Check if EOL issue already exists
+          const issues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: ['dependencies', 'eol'],
+            state: 'open'
+          });
+          
+          const title = `🔍 End-of-Life Dependencies Detected (${process.env.EOL_COUNT} EOL, ${process.env.APPROACHING_COUNT} approaching)`;
+          
+          if (issues.data.length === 0) {
+            // Create new issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: report,
+              labels: ['dependencies', 'eol', 'security']
+            });
+          } else {
+            // Update existing issue
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issues.data[0].number,
+              title: title,
+              body: report
+            });
+          }
+          
+    - name: Add to GitHub Summary
+      run: |
+        cat eol_report.md >> $GITHUB_STEP_SUMMARY
+        
+    - name: Fail on EOL Dependencies
+      if: inputs.fail_on_eol == true && steps.eol-check.outputs.eol-count != '0'
+      run: |
+        echo "❌ Failing workflow due to $EOL_COUNT EOL dependencies found"
+        echo "Use the generated report to update these dependencies"
+        exit 1
