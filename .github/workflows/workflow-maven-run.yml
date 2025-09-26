@@ -104,27 +104,37 @@ jobs:
           TOTAL_SKIPPED=0
           FILES_FOUND=0
           
-          # Process all TEST-*.xml files from all modules - try multiple patterns
-          for pattern in "*/target/surefire-reports/TEST-*.xml" "target/surefire-reports/TEST-*.xml" "**/target/surefire-reports/TEST-*.xml"; do
-            echo "Checking pattern: $pattern"
-            for xml_file in $pattern; do
-              if [ -f "$xml_file" ]; then
-                echo "Processing file: $xml_file"
-                FILES_FOUND=$((FILES_FOUND + 1))
-                tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                
-                echo "  Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
-                
-                TOTAL_TESTS=$((TOTAL_TESTS + tests))
-                TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
-                TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
-                TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
+          # Create a list to track processed files to avoid duplicates
+          declare -A PROCESSED_FILES
+          
+          # Process all TEST-*.xml files from all modules - use find to avoid duplicates
+          echo "Using find command to locate all TEST-*.xml files..."
+          while IFS= read -r -d '' xml_file; do
+            if [ -f "$xml_file" ]; then
+              # Check if we've already processed this file
+              if [[ -n "${PROCESSED_FILES[$xml_file]}" ]]; then
+                echo "Skipping duplicate file: $xml_file"
+                continue
               fi
-            done
-          done
+              
+              echo "Processing file: $xml_file"
+              PROCESSED_FILES[$xml_file]=1
+              FILES_FOUND=$((FILES_FOUND + 1))
+              
+              tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              
+              echo "  File: $xml_file"
+              echo "  Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + tests))
+              TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
+              TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
+              TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
+            fi
+          done < <(find . -name "TEST-*.xml" -type f -print0 2>/dev/null)
           
           echo "Total files found: $FILES_FOUND"
           echo "Total tests: $TOTAL_TESTS"
@@ -190,36 +200,64 @@ jobs:
           echo "| Module | Tests | Passed | Failed | Skipped |" >> $TEST_SUMMARY_FILE
           echo "|--------|-------|--------|--------|---------|" >> $TEST_SUMMARY_FILE
           
-          for module in api-gateway api-registry api-registry-common; do
-            if [ -d "$module/target/surefire-reports" ]; then
-              MODULE_TESTS=0
-              MODULE_FAILURES=0
-              MODULE_ERRORS=0
-              MODULE_SKIPPED=0
-              
-              for xml_file in $module/target/surefire-reports/TEST-*.xml; do
-                if [ -f "$xml_file" ]; then
-                  tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                  failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                  errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                  skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-                  
-                  MODULE_TESTS=$((MODULE_TESTS + tests))
-                  MODULE_FAILURES=$((MODULE_FAILURES + failures))
-                  MODULE_ERRORS=$((MODULE_ERRORS + errors))
-                  MODULE_SKIPPED=$((MODULE_SKIPPED + skipped))
-                fi
-              done
-              
-              MODULE_PASSED=$((MODULE_TESTS - MODULE_FAILURES - MODULE_ERRORS - MODULE_SKIPPED))
-              MODULE_FAILED=$((MODULE_FAILURES + MODULE_ERRORS))
-              
-              if [ $MODULE_TESTS -gt 0 ]; then
-                echo "| **$module** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $GITHUB_STEP_SUMMARY
-                echo "| **$module** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $TEST_SUMMARY_FILE
+          # Dynamically find modules with surefire-reports directories
+          echo "Finding modules with test reports..."
+          for surefire_dir in $(find . -type d -name "surefire-reports" | sort); do
+            # Extract module name from path (e.g., ./api-gateway/target/surefire-reports -> api-gateway)
+            module_path=$(dirname "$(dirname "$surefire_dir")")
+            module_name=$(basename "$module_path")
+            
+            # Skip if this is the root directory (single module project)
+            if [ "$module_path" = "." ]; then
+              module_name="root"
+            fi
+            
+            echo "Processing module: $module_name (path: $module_path)"
+            
+            MODULE_TESTS=0
+            MODULE_FAILURES=0
+            MODULE_ERRORS=0
+            MODULE_SKIPPED=0
+            
+            for xml_file in $surefire_dir/TEST-*.xml; do
+              if [ -f "$xml_file" ]; then
+                echo "  Processing module file: $xml_file"
+                tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                
+                echo "    Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
+                
+                MODULE_TESTS=$((MODULE_TESTS + tests))
+                MODULE_FAILURES=$((MODULE_FAILURES + failures))
+                MODULE_ERRORS=$((MODULE_ERRORS + errors))
+                MODULE_SKIPPED=$((MODULE_SKIPPED + skipped))
               fi
+            done
+            
+            MODULE_PASSED=$((MODULE_TESTS - MODULE_FAILURES - MODULE_ERRORS - MODULE_SKIPPED))
+            MODULE_FAILED=$((MODULE_FAILURES + MODULE_ERRORS))
+            
+            if [ $MODULE_TESTS -gt 0 ]; then
+              echo "  Module $module_name totals: Tests=$MODULE_TESTS, Passed=$MODULE_PASSED, Failed=$MODULE_FAILED, Skipped=$MODULE_SKIPPED"
+              echo "| **$module_name** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $GITHUB_STEP_SUMMARY
+              echo "| **$module_name** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $TEST_SUMMARY_FILE
             fi
           done
+          
+          # Add verification section to compare totals
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Verification" >> $GITHUB_STEP_SUMMARY
+          echo "- Total tests found: $TOTAL_TESTS" >> $GITHUB_STEP_SUMMARY
+          echo "- Total files processed: $FILES_FOUND" >> $GITHUB_STEP_SUMMARY
+          echo "- Calculation: $TOTAL_TESTS total = $TOTAL_PASSED passed + $TOTAL_FAILURES failures + $TOTAL_ERRORS errors + $TOTAL_SKIPPED skipped" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $TEST_SUMMARY_FILE
+          echo "## Verification" >> $TEST_SUMMARY_FILE
+          echo "- Total tests found: $TOTAL_TESTS" >> $TEST_SUMMARY_FILE
+          echo "- Total files processed: $FILES_FOUND" >> $TEST_SUMMARY_FILE
+          echo "- Calculation: $TOTAL_TESTS total = $TOTAL_PASSED passed + $TOTAL_FAILURES failures + $TOTAL_ERRORS errors + $TOTAL_SKIPPED skipped" >> $TEST_SUMMARY_FILE
           
       - name: Capture test summary for output
         id: capture-summary
