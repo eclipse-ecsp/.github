@@ -66,7 +66,7 @@ jobs:
         if: ${{ inputs.summaries-test-report }}
         run: |
           # Create workflow summary with test results
-          echo "# 📊 Surefire Test Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# 📊 Test Report Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           # Count total tests from XML files
@@ -154,7 +154,7 @@ jobs:
         if: ${{ inputs.test-report }}
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-reports
+          name: unit-test-report
           path: target/reports/
           retention-days: 30
           
@@ -162,7 +162,7 @@ jobs:
         if: ${{ inputs.test-report }}
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-modules-reports
+          name: unit-test-modules-report
           path: |
             */target/site/surefire-report.html
             */target/surefire-reports/
