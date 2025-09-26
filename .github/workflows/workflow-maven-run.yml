@@ -246,19 +246,6 @@ jobs:
             fi
           done
           
-          # Add verification section to compare totals
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## Verification" >> $GITHUB_STEP_SUMMARY
-          echo "- Total tests found: $TOTAL_TESTS" >> $GITHUB_STEP_SUMMARY
-          echo "- Total files processed: $FILES_FOUND" >> $GITHUB_STEP_SUMMARY
-          echo "- Calculation: $TOTAL_TESTS total = $TOTAL_PASSED passed + $TOTAL_FAILURES failures + $TOTAL_ERRORS errors + $TOTAL_SKIPPED skipped" >> $GITHUB_STEP_SUMMARY
-          
-          echo "" >> $TEST_SUMMARY_FILE
-          echo "## Verification" >> $TEST_SUMMARY_FILE
-          echo "- Total tests found: $TOTAL_TESTS" >> $TEST_SUMMARY_FILE
-          echo "- Total files processed: $FILES_FOUND" >> $TEST_SUMMARY_FILE
-          echo "- Calculation: $TOTAL_TESTS total = $TOTAL_PASSED passed + $TOTAL_FAILURES failures + $TOTAL_ERRORS errors + $TOTAL_SKIPPED skipped" >> $TEST_SUMMARY_FILE
-          
       - name: Capture test summary for output
         id: capture-summary
         if: ${{ inputs.summaries-test-report }}
