@@ -219,13 +219,27 @@ jobs:
               console.log('Successfully read workflow summary');
               console.log('Summary file path:', summaryFile);
               console.log('Summary content length:', summaryContent.length);
-              console.log('Summary preview:', summaryContent.substring(0, 200));
+              console.log('Summary preview (first 300 chars):', summaryContent.substring(0, 300));
+              console.log('Summary content (full):', summaryContent);
               
               // Check if summary actually contains test results (look for specific content)
-              if (!summaryContent || summaryContent.trim() === '' || !summaryContent.includes('Test Report Summary')) {
-                console.log('Workflow summary is empty or does not contain test results, skipping PR comment');
+              if (!summaryContent || summaryContent.trim() === '') {
+                console.log('Workflow summary is empty, skipping PR comment');
                 console.log('Summary content available:', summaryContent ? 'yes' : 'no');
+                return;
+              }
+              
+              // Check if summary contains meaningful test report content
+              const hasTestResults = summaryContent.includes('Test Report Summary') || 
+                                   summaryContent.includes('Test Results Overview') ||
+                                   summaryContent.includes('Module Test Breakdown');
+              
+              if (!hasTestResults) {
+                console.log('Workflow summary does not contain test results, skipping PR comment');
+                console.log('Summary content preview:', summaryContent.substring(0, 300));
                 console.log('Contains Test Report Summary:', summaryContent.includes('Test Report Summary'));
+                console.log('Contains Test Results Overview:', summaryContent.includes('Test Results Overview'));
+                console.log('Contains Module Test Breakdown:', summaryContent.includes('Module Test Breakdown'));
                 return;
               }
               
