@@ -165,9 +165,14 @@ jobs:
       - name: Add test status to job summary
         if: ${{ inputs.summaries-test-report }}
         run: |
-          TOTAL_TESTS=$(cat $GITHUB_OUTPUT | grep "total_tests=" | cut -d'=' -f2)
-          TOTAL_PASSED=$(cat $GITHUB_OUTPUT | grep "total_passed=" | cut -d'=' -f2)
-          TOTAL_FAILED=$(cat $GITHUB_OUTPUT | grep "total_failed=" | cut -d'=' -f2)
+          TOTAL_TESTS=$(grep "total_tests=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
+          TOTAL_PASSED=$(grep "total_passed=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
+          TOTAL_FAILED=$(grep "total_failed=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
+          
+          # Ensure variables are not empty and are numeric
+          TOTAL_TESTS=${TOTAL_TESTS:-0}
+          TOTAL_PASSED=${TOTAL_PASSED:-0}
+          TOTAL_FAILED=${TOTAL_FAILED:-0}
           
           if [ "$TOTAL_FAILED" -eq 0 ]; then
             echo "✅ All $TOTAL_TESTS tests passed successfully!" >> $GITHUB_STEP_SUMMARY
