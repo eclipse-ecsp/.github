@@ -61,6 +61,8 @@ jobs:
     with:
       java_version: '17'
       maven_args: 'clean verify'
+      test-report: false # create unit-test report 
+      summaries-test-report: false # add summary to the workflow run
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
 ```
