@@ -149,44 +149,12 @@ jobs:
             fi
           done
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📁 Available Reports" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Aggregated HTML Report**: Available in \`surefire-reports\` artifact" >> $GITHUB_STEP_SUMMARY
-          echo "- **Individual Module Reports**: Available in \`module-surefire-reports\` artifact" >> $GITHUB_STEP_SUMMARY
-          echo "- **Report Location**: \`target/reports/surefire.html\` (aggregated)" >> $GITHUB_STEP_SUMMARY
-          
-          # Set output variables for potential use in other jobs
-          echo "total_tests=$TOTAL_TESTS" >> $GITHUB_OUTPUT
-          echo "total_passed=$TOTAL_PASSED" >> $GITHUB_OUTPUT
-          echo "total_failed=$((TOTAL_FAILURES + TOTAL_ERRORS))" >> $GITHUB_OUTPUT
-          echo "total_skipped=$TOTAL_SKIPPED" >> $GITHUB_OUTPUT
-        
-      - name: Add test status to job summary
-        if: ${{ inputs.summaries-test-report }}
-        run: |
-          TOTAL_TESTS=$(grep "total_tests=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
-          TOTAL_PASSED=$(grep "total_passed=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
-          TOTAL_FAILED=$(grep "total_failed=" "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo "0")
-          
-          # Ensure variables are not empty and are numeric
-          TOTAL_TESTS=${TOTAL_TESTS:-0}
-          TOTAL_PASSED=${TOTAL_PASSED:-0}
-          TOTAL_FAILED=${TOTAL_FAILED:-0}
-          
-          if [ "$TOTAL_FAILED" -eq 0 ]; then
-            echo "✅ All $TOTAL_TESTS tests passed successfully!" >> $GITHUB_STEP_SUMMARY
-            exit 0
-          else
-            echo "❌ $TOTAL_FAILED out of $TOTAL_TESTS tests failed!" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
         
       - name: Upload Surefire reports
         if: ${{ inputs.test-report }}
         uses: actions/upload-artifact@v4
         with:
-          name: surefire-reports
+          name: unit-test-reports
           path: target/reports/
           retention-days: 30
           
@@ -194,7 +162,7 @@ jobs:
         if: ${{ inputs.test-report }}
         uses: actions/upload-artifact@v4
         with:
-          name: module-surefire-reports
+          name: unit-test-modules-reports
           path: |
             */target/site/surefire-report.html
             */target/surefire-reports/
