@@ -13,6 +13,16 @@ on:
         required: false
         type: string
         default: 'clean package --file pom.xml'
+      test-report:
+        description: 'Whether to generate test reports'
+        required: false
+        type: boolean
+        default: false
+      summaries-test-report:
+        description: 'Whether to generate test summaries'
+        required: false
+        type: boolean
+        default: false
     secrets:
       token:
         required: true
@@ -45,3 +55,142 @@ jobs:
 
       - name: Build with Maven
         run: mvn ${{ inputs.maven_args }}
+      
+      - name: Generate aggregated Surefire reports
+        if: ${{ inputs.test-report || inputs.summaries-test-report }}
+        run: |
+          # Create directory for aggregated reports
+          mvn surefire-report:report-only -B
+        
+      - name: Parse test results and add to summary
+        if: ${{ inputs.summaries-test-report }}
+        run: |
+          # Create workflow summary with test results
+          echo "# 📊 Surefire Test Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count total tests from XML files
+          TOTAL_TESTS=0
+          TOTAL_FAILURES=0
+          TOTAL_ERRORS=0
+          TOTAL_SKIPPED=0
+          
+          # Process all TEST-*.xml files from all modules
+          for xml_file in */target/surefire-reports/TEST-*.xml; do
+            if [ -f "$xml_file" ]; then
+              tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + tests))
+              TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
+              TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
+              TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
+            fi
+          done
+          
+          TOTAL_PASSED=$((TOTAL_TESTS - TOTAL_FAILURES - TOTAL_ERRORS - TOTAL_SKIPPED))
+          
+          # Create summary table
+          echo "## Test Results Overview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count | Percentage |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $TOTAL_TESTS -gt 0 ]; then
+            PASS_PCT=$(( (TOTAL_PASSED * 100) / TOTAL_TESTS ))
+            FAIL_PCT=$(( ((TOTAL_FAILURES + TOTAL_ERRORS) * 100) / TOTAL_TESTS ))
+            SKIP_PCT=$(( (TOTAL_SKIPPED * 100) / TOTAL_TESTS ))
+            
+            echo "| ✅ **Passed** | $TOTAL_PASSED | ${PASS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ **Failed** | $((TOTAL_FAILURES + TOTAL_ERRORS)) | ${FAIL_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏭️ **Skipped** | $TOTAL_SKIPPED | ${SKIP_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| 📊 **Total** | $TOTAL_TESTS | 100% |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| ⚠️ **No tests found** | 0 | 0% |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add module breakdown
+          echo "## Module Test Breakdown" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Module | Tests | Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          for module in api-gateway api-registry api-registry-common; do
+            if [ -d "$module/target/surefire-reports" ]; then
+              MODULE_TESTS=0
+              MODULE_FAILURES=0
+              MODULE_ERRORS=0
+              MODULE_SKIPPED=0
+              
+              for xml_file in $module/target/surefire-reports/TEST-*.xml; do
+                if [ -f "$xml_file" ]; then
+                  tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                  failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                  errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                  skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                  
+                  MODULE_TESTS=$((MODULE_TESTS + tests))
+                  MODULE_FAILURES=$((MODULE_FAILURES + failures))
+                  MODULE_ERRORS=$((MODULE_ERRORS + errors))
+                  MODULE_SKIPPED=$((MODULE_SKIPPED + skipped))
+                fi
+              done
+              
+              MODULE_PASSED=$((MODULE_TESTS - MODULE_FAILURES - MODULE_ERRORS - MODULE_SKIPPED))
+              MODULE_FAILED=$((MODULE_FAILURES + MODULE_ERRORS))
+              
+              if [ $MODULE_TESTS -gt 0 ]; then
+                echo "| **$module** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $GITHUB_STEP_SUMMARY
+              fi
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📁 Available Reports" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Aggregated HTML Report**: Available in \`surefire-reports\` artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Individual Module Reports**: Available in \`module-surefire-reports\` artifact" >> $GITHUB_STEP_SUMMARY
+          echo "- **Report Location**: \`target/reports/surefire.html\` (aggregated)" >> $GITHUB_STEP_SUMMARY
+          
+          # Set output variables for potential use in other jobs
+          echo "total_tests=$TOTAL_TESTS" >> $GITHUB_OUTPUT
+          echo "total_passed=$TOTAL_PASSED" >> $GITHUB_OUTPUT
+          echo "total_failed=$((TOTAL_FAILURES + TOTAL_ERRORS))" >> $GITHUB_OUTPUT
+          echo "total_skipped=$TOTAL_SKIPPED" >> $GITHUB_OUTPUT
+        
+      - name: Add test status to job summary
+        if: ${{ inputs.summaries-test-report }}
+        run: |
+          TOTAL_TESTS=$(cat $GITHUB_OUTPUT | grep "total_tests=" | cut -d'=' -f2)
+          TOTAL_PASSED=$(cat $GITHUB_OUTPUT | grep "total_passed=" | cut -d'=' -f2)
+          TOTAL_FAILED=$(cat $GITHUB_OUTPUT | grep "total_failed=" | cut -d'=' -f2)
+          
+          if [ "$TOTAL_FAILED" -eq 0 ]; then
+            echo "✅ All $TOTAL_TESTS tests passed successfully!" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          else
+            echo "❌ $TOTAL_FAILED out of $TOTAL_TESTS tests failed!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+        
+      - name: Upload Surefire reports
+        if: ${{ inputs.test-report }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/reports/
+          retention-days: 30
+          
+      - name: Upload individual module reports
+        if: ${{ inputs.test-report }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: module-surefire-reports
+          path: |
+            */target/site/surefire-report.html
+            */target/surefire-reports/
+          retention-days: 30
