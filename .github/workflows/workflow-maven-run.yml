@@ -79,34 +79,68 @@ jobs:
           echo "# 📊 Test Report Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
+          # Also create a separate file for PR commenting
+          TEST_SUMMARY_FILE="test-summary.md"
+          echo "# 📊 Test Report Summary" > $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          
+          # Debug: Show what directories and files exist
+          echo "Debug: Checking for test report files..."
+          echo "Current directory: $(pwd)"
+          echo "Available directories:"
+          ls -la
+          echo ""
+          echo "Looking for surefire-reports directories:"
+          find . -type d -name "surefire-reports" 2>/dev/null || echo "No surefire-reports directories found"
+          echo ""
+          echo "Looking for TEST-*.xml files:"
+          find . -name "TEST-*.xml" 2>/dev/null || echo "No TEST-*.xml files found"
+          echo ""
+          
           # Count total tests from XML files
           TOTAL_TESTS=0
           TOTAL_FAILURES=0
           TOTAL_ERRORS=0
           TOTAL_SKIPPED=0
+          FILES_FOUND=0
           
-          # Process all TEST-*.xml files from all modules
-          for xml_file in */target/surefire-reports/TEST-*.xml; do
-            if [ -f "$xml_file" ]; then
-              tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-              failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-              errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-              skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
-              
-              TOTAL_TESTS=$((TOTAL_TESTS + tests))
-              TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
-              TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
-              TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
-            fi
+          # Process all TEST-*.xml files from all modules - try multiple patterns
+          for pattern in "*/target/surefire-reports/TEST-*.xml" "target/surefire-reports/TEST-*.xml" "**/target/surefire-reports/TEST-*.xml"; do
+            echo "Checking pattern: $pattern"
+            for xml_file in $pattern; do
+              if [ -f "$xml_file" ]; then
+                echo "Processing file: $xml_file"
+                FILES_FOUND=$((FILES_FOUND + 1))
+                tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                
+                echo "  Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
+                
+                TOTAL_TESTS=$((TOTAL_TESTS + tests))
+                TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
+                TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
+                TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
+              fi
+            done
           done
+          
+          echo "Total files found: $FILES_FOUND"
+          echo "Total tests: $TOTAL_TESTS"
           
           TOTAL_PASSED=$((TOTAL_TESTS - TOTAL_FAILURES - TOTAL_ERRORS - TOTAL_SKIPPED))
           
-          # Create summary table
+          # Create summary table (write to both files)
           echo "## Test Results Overview" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Status | Count | Percentage |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Test Results Overview" >> $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          echo "| Status | Count | Percentage |" >> $TEST_SUMMARY_FILE
+          echo "|--------|-------|------------|" >> $TEST_SUMMARY_FILE
           
           if [ $TOTAL_TESTS -gt 0 ]; then
             PASS_PCT=$(( (TOTAL_PASSED * 100) / TOTAL_TESTS ))
@@ -117,17 +151,44 @@ jobs:
             echo "| ❌ **Failed** | $((TOTAL_FAILURES + TOTAL_ERRORS)) | ${FAIL_PCT}% |" >> $GITHUB_STEP_SUMMARY
             echo "| ⏭️ **Skipped** | $TOTAL_SKIPPED | ${SKIP_PCT}% |" >> $GITHUB_STEP_SUMMARY
             echo "| 📊 **Total** | $TOTAL_TESTS | 100% |" >> $GITHUB_STEP_SUMMARY
+            
+            echo "| ✅ **Passed** | $TOTAL_PASSED | ${PASS_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| ❌ **Failed** | $((TOTAL_FAILURES + TOTAL_ERRORS)) | ${FAIL_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| ⏭️ **Skipped** | $TOTAL_SKIPPED | ${SKIP_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| 📊 **Total** | $TOTAL_TESTS | 100% |" >> $TEST_SUMMARY_FILE
           else
             echo "| ⚠️ **No tests found** | 0 | 0% |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** No test XML files were found. This could mean:" >> $GITHUB_STEP_SUMMARY
+            echo "- Tests were not executed" >> $GITHUB_STEP_SUMMARY
+            echo "- Test reports are in a different location" >> $GITHUB_STEP_SUMMARY
+            echo "- Maven goals did not include test execution" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "XML files searched: $FILES_FOUND files found" >> $GITHUB_STEP_SUMMARY
+            
+            echo "| ⚠️ **No tests found** | 0 | 0% |" >> $TEST_SUMMARY_FILE
+            echo "" >> $TEST_SUMMARY_FILE
+            echo "**Note:** No test XML files were found. This could mean:" >> $TEST_SUMMARY_FILE
+            echo "- Tests were not executed" >> $TEST_SUMMARY_FILE
+            echo "- Test reports are in a different location" >> $TEST_SUMMARY_FILE
+            echo "- Maven goals did not include test execution" >> $TEST_SUMMARY_FILE
+            echo "" >> $TEST_SUMMARY_FILE
+            echo "XML files searched: $FILES_FOUND files found" >> $TEST_SUMMARY_FILE
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $TEST_SUMMARY_FILE
           
           # Add module breakdown
           echo "## Module Test Breakdown" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Module | Tests | Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Module Test Breakdown" >> $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          echo "| Module | Tests | Passed | Failed | Skipped |" >> $TEST_SUMMARY_FILE
+          echo "|--------|-------|--------|--------|---------|" >> $TEST_SUMMARY_FILE
           
           for module in api-gateway api-registry api-registry-common; do
             if [ -d "$module/target/surefire-reports" ]; then
@@ -155,6 +216,7 @@ jobs:
               
               if [ $MODULE_TESTS -gt 0 ]; then
                 echo "| **$module** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $GITHUB_STEP_SUMMARY
+                echo "| **$module** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $TEST_SUMMARY_FILE
               fi
             fi
           done
@@ -163,10 +225,11 @@ jobs:
         id: capture-summary
         if: ${{ inputs.summaries-test-report }}
         run: |
-          # Read the summary file and set as output
-          if [ -f "$GITHUB_STEP_SUMMARY" ]; then
+          # Read the test summary file and set as output
+          TEST_SUMMARY_FILE="test-summary.md"
+          if [ -f "$TEST_SUMMARY_FILE" ]; then
             # Create a safe output by encoding the summary
-            SUMMARY_CONTENT=$(cat "$GITHUB_STEP_SUMMARY" | base64 -w 0)
+            SUMMARY_CONTENT=$(cat "$TEST_SUMMARY_FILE" | base64 -w 0)
             echo "test-summary=$SUMMARY_CONTENT" >> $GITHUB_OUTPUT
           else
             echo "test-summary=" >> $GITHUB_OUTPUT
@@ -205,18 +268,18 @@ jobs:
             // Add small delay to ensure summary file is fully written
             await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // Read the workflow summary that was already generated
-            const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+            // Read the test summary file that was created specifically for PR comments
+            const summaryFile = 'test-summary.md';
             let summaryContent = '';
             
             try {
-              if (!summaryFile || !fs.existsSync(summaryFile)) {
-                console.log('Summary file does not exist:', summaryFile);
+              if (!fs.existsSync(summaryFile)) {
+                console.log('Test summary file does not exist:', summaryFile);
                 return;
               }
               
               summaryContent = fs.readFileSync(summaryFile, 'utf8');
-              console.log('Successfully read workflow summary');
+              console.log('Successfully read test summary file');
               console.log('Summary file path:', summaryFile);
               console.log('Summary content length:', summaryContent.length);
               console.log('Summary preview (first 300 chars):', summaryContent.substring(0, 300));
@@ -224,7 +287,7 @@ jobs:
               
               // Check if summary actually contains test results (look for specific content)
               if (!summaryContent || summaryContent.trim() === '') {
-                console.log('Workflow summary is empty, skipping PR comment');
+                console.log('Test summary is empty, skipping PR comment');
                 console.log('Summary content available:', summaryContent ? 'yes' : 'no');
                 return;
               }
@@ -232,19 +295,21 @@ jobs:
               // Check if summary contains meaningful test report content
               const hasTestResults = summaryContent.includes('Test Report Summary') || 
                                    summaryContent.includes('Test Results Overview') ||
-                                   summaryContent.includes('Module Test Breakdown');
+                                   summaryContent.includes('Module Test Breakdown') ||
+                                   summaryContent.includes('No tests found');
               
               if (!hasTestResults) {
-                console.log('Workflow summary does not contain test results, skipping PR comment');
-                console.log('Summary content preview:', summaryContent.substring(0, 300));
+                console.log('Test summary does not contain test results, skipping PR comment');
+                console.log('Summary content preview:', summaryContent.substring(0, 500));
                 console.log('Contains Test Report Summary:', summaryContent.includes('Test Report Summary'));
                 console.log('Contains Test Results Overview:', summaryContent.includes('Test Results Overview'));
                 console.log('Contains Module Test Breakdown:', summaryContent.includes('Module Test Breakdown'));
+                console.log('Contains No tests found:', summaryContent.includes('No tests found'));
                 return;
               }
               
             } catch (error) {
-              console.log('Could not read workflow summary:', error.message);
+              console.log('Could not read test summary file:', error.message);
               console.log('Skipping PR comment since summary is not available');
               return;
             }
