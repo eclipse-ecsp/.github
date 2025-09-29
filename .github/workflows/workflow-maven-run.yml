@@ -13,12 +13,32 @@ on:
         required: false
         type: string
         default: 'clean package --file pom.xml'
+      test-report:
+        description: 'Whether to generate test reports'
+        required: false
+        type: boolean
+        default: false
+      summaries-test-report:
+        description: 'Whether to generate test summaries'
+        required: false
+        type: boolean
+        default: false
+      pr_number:
+        description: 'Pull request number for commenting (when called from PR context)'
+        required: false
+        type: string
+    outputs:
+      test-summary:
+        description: 'Test summary content'
+        value: ${{ jobs.build.outputs.test-summary }}
     secrets:
       token:
         required: true
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      test-summary: ${{ steps.capture-summary.outputs.test-summary }}
 
     steps:
       - name: Checkout code
@@ -45,3 +65,316 @@ jobs:
 
       - name: Build with Maven
         run: mvn ${{ inputs.maven_args }}
+      
+      - name: Generate aggregated Surefire reports
+        if: ${{ inputs.test-report || inputs.summaries-test-report }}
+        run: |
+          # Create directory for aggregated reports
+          mvn surefire-report:report-only -B
+        
+      - name: Parse test results and add to summary
+        if: ${{ inputs.summaries-test-report }}
+        run: |
+          # Create workflow summary with test results
+          echo "# 📊 Test Report Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Also create a separate file for PR commenting
+          TEST_SUMMARY_FILE="test-summary.md"
+          echo "# 📊 Test Report Summary" > $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          
+          # Debug: Show what directories and files exist
+          echo "Debug: Checking for test report files..."
+          echo "Current directory: $(pwd)"
+          echo "Available directories:"
+          ls -la
+          echo ""
+          echo "Looking for surefire-reports directories:"
+          find . -type d -name "surefire-reports" 2>/dev/null || echo "No surefire-reports directories found"
+          echo ""
+          echo "Looking for TEST-*.xml files:"
+          find . -name "TEST-*.xml" 2>/dev/null || echo "No TEST-*.xml files found"
+          echo ""
+          
+          # Count total tests from XML files
+          TOTAL_TESTS=0
+          TOTAL_FAILURES=0
+          TOTAL_ERRORS=0
+          TOTAL_SKIPPED=0
+          FILES_FOUND=0
+          
+          # Create a list to track processed files to avoid duplicates
+          declare -A PROCESSED_FILES
+          
+          # Process all TEST-*.xml files from all modules - use find to avoid duplicates
+          echo "Using find command to locate all TEST-*.xml files..."
+          while IFS= read -r -d '' xml_file; do
+            if [ -f "$xml_file" ]; then
+              # Check if we've already processed this file
+              if [[ -n "${PROCESSED_FILES[$xml_file]}" ]]; then
+                echo "Skipping duplicate file: $xml_file"
+                continue
+              fi
+              
+              echo "Processing file: $xml_file"
+              PROCESSED_FILES[$xml_file]=1
+              FILES_FOUND=$((FILES_FOUND + 1))
+              
+              tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+              
+              echo "  File: $xml_file"
+              echo "  Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
+              
+              TOTAL_TESTS=$((TOTAL_TESTS + tests))
+              TOTAL_FAILURES=$((TOTAL_FAILURES + failures))
+              TOTAL_ERRORS=$((TOTAL_ERRORS + errors))
+              TOTAL_SKIPPED=$((TOTAL_SKIPPED + skipped))
+            fi
+          done < <(find . -name "TEST-*.xml" -type f -print0 2>/dev/null)
+          
+          echo "Total files found: $FILES_FOUND"
+          echo "Total tests: $TOTAL_TESTS"
+          
+          TOTAL_PASSED=$((TOTAL_TESTS - TOTAL_FAILURES - TOTAL_ERRORS - TOTAL_SKIPPED))
+          
+          # Create summary table (write to both files)
+          echo "## Test Results Overview" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count | Percentage |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Test Results Overview" >> $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          echo "| Status | Count | Percentage |" >> $TEST_SUMMARY_FILE
+          echo "|--------|-------|------------|" >> $TEST_SUMMARY_FILE
+          
+          if [ $TOTAL_TESTS -gt 0 ]; then
+            PASS_PCT=$(( (TOTAL_PASSED * 100) / TOTAL_TESTS ))
+            FAIL_PCT=$(( ((TOTAL_FAILURES + TOTAL_ERRORS) * 100) / TOTAL_TESTS ))
+            SKIP_PCT=$(( (TOTAL_SKIPPED * 100) / TOTAL_TESTS ))
+            
+            echo "| ✅ **Passed** | $TOTAL_PASSED | ${PASS_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ **Failed** | $((TOTAL_FAILURES + TOTAL_ERRORS)) | ${FAIL_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏭️ **Skipped** | $TOTAL_SKIPPED | ${SKIP_PCT}% |" >> $GITHUB_STEP_SUMMARY
+            echo "| 📊 **Total** | $TOTAL_TESTS | 100% |" >> $GITHUB_STEP_SUMMARY
+            
+            echo "| ✅ **Passed** | $TOTAL_PASSED | ${PASS_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| ❌ **Failed** | $((TOTAL_FAILURES + TOTAL_ERRORS)) | ${FAIL_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| ⏭️ **Skipped** | $TOTAL_SKIPPED | ${SKIP_PCT}% |" >> $TEST_SUMMARY_FILE
+            echo "| 📊 **Total** | $TOTAL_TESTS | 100% |" >> $TEST_SUMMARY_FILE
+          else
+            echo "| ⚠️ **No tests found** | 0 | 0% |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** No test XML files were found. This could mean:" >> $GITHUB_STEP_SUMMARY
+            echo "- Tests were not executed" >> $GITHUB_STEP_SUMMARY
+            echo "- Test reports are in a different location" >> $GITHUB_STEP_SUMMARY
+            echo "- Maven goals did not include test execution" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "XML files searched: $FILES_FOUND files found" >> $GITHUB_STEP_SUMMARY
+            
+            echo "| ⚠️ **No tests found** | 0 | 0% |" >> $TEST_SUMMARY_FILE
+            echo "" >> $TEST_SUMMARY_FILE
+            echo "**Note:** No test XML files were found. This could mean:" >> $TEST_SUMMARY_FILE
+            echo "- Tests were not executed" >> $TEST_SUMMARY_FILE
+            echo "- Test reports are in a different location" >> $TEST_SUMMARY_FILE
+            echo "- Maven goals did not include test execution" >> $TEST_SUMMARY_FILE
+            echo "" >> $TEST_SUMMARY_FILE
+            echo "XML files searched: $FILES_FOUND files found" >> $TEST_SUMMARY_FILE
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $TEST_SUMMARY_FILE
+          
+          # Add module breakdown
+          echo "## Module Test Breakdown" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Module | Tests | Passed | Failed | Skipped |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|--------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Module Test Breakdown" >> $TEST_SUMMARY_FILE
+          echo "" >> $TEST_SUMMARY_FILE
+          echo "| Module | Tests | Passed | Failed | Skipped |" >> $TEST_SUMMARY_FILE
+          echo "|--------|-------|--------|--------|---------|" >> $TEST_SUMMARY_FILE
+          
+          # Dynamically find modules with surefire-reports directories
+          echo "Finding modules with test reports..."
+          for surefire_dir in $(find . -type d -name "surefire-reports" | sort); do
+            # Extract module name from path (e.g., ./api-gateway/target/surefire-reports -> api-gateway)
+            module_path=$(dirname "$(dirname "$surefire_dir")")
+            module_name=$(basename "$module_path")
+            
+            # Skip if this is the root directory (single module project)
+            if [ "$module_path" = "." ]; then
+              module_name="root"
+            fi
+            
+            echo "Processing module: $module_name (path: $module_path)"
+            
+            MODULE_TESTS=0
+            MODULE_FAILURES=0
+            MODULE_ERRORS=0
+            MODULE_SKIPPED=0
+            
+            for xml_file in $surefire_dir/TEST-*.xml; do
+              if [ -f "$xml_file" ]; then
+                echo "  Processing module file: $xml_file"
+                tests=$(grep -o 'tests="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                failures=$(grep -o 'failures="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                errors=$(grep -o 'errors="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                skipped=$(grep -o 'skipped="[0-9]*"' "$xml_file" | grep -o '[0-9]*' || echo "0")
+                
+                echo "    Tests: $tests, Failures: $failures, Errors: $errors, Skipped: $skipped"
+                
+                MODULE_TESTS=$((MODULE_TESTS + tests))
+                MODULE_FAILURES=$((MODULE_FAILURES + failures))
+                MODULE_ERRORS=$((MODULE_ERRORS + errors))
+                MODULE_SKIPPED=$((MODULE_SKIPPED + skipped))
+              fi
+            done
+            
+            MODULE_PASSED=$((MODULE_TESTS - MODULE_FAILURES - MODULE_ERRORS - MODULE_SKIPPED))
+            MODULE_FAILED=$((MODULE_FAILURES + MODULE_ERRORS))
+            
+            if [ $MODULE_TESTS -gt 0 ]; then
+              echo "  Module $module_name totals: Tests=$MODULE_TESTS, Passed=$MODULE_PASSED, Failed=$MODULE_FAILED, Skipped=$MODULE_SKIPPED"
+              echo "| **$module_name** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $GITHUB_STEP_SUMMARY
+              echo "| **$module_name** | $MODULE_TESTS | $MODULE_PASSED | $MODULE_FAILED | $MODULE_SKIPPED |" >> $TEST_SUMMARY_FILE
+            fi
+          done
+          
+      - name: Capture test summary for output
+        id: capture-summary
+        if: ${{ inputs.summaries-test-report }}
+        run: |
+          # Read the test summary file and set as output
+          TEST_SUMMARY_FILE="test-summary.md"
+          if [ -f "$TEST_SUMMARY_FILE" ]; then
+            # Create a safe output by encoding the summary
+            SUMMARY_CONTENT=$(cat "$TEST_SUMMARY_FILE" | base64 -w 0)
+            echo "test-summary=$SUMMARY_CONTENT" >> $GITHUB_OUTPUT
+          else
+            echo "test-summary=" >> $GITHUB_OUTPUT
+          fi
+          
+        
+      - name: Comment test summary on PR
+        if: ${{ inputs.summaries-test-report && (github.event_name == 'pull_request' || inputs.pr_number) }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.token }}
+          script: |
+            const fs = require('fs');
+            
+            // Verify we're in a PR context
+            console.log('Event name:', context.eventName);
+            console.log('Payload keys:', Object.keys(context.payload));
+            console.log('Input PR number:', '${{ inputs.pr_number }}');
+            
+            // Get PR number - from input, pull_request, or issue context
+            const prNumber = '${{ inputs.pr_number }}' || 
+                           context.payload.pull_request?.number || 
+                           context.issue?.number;
+            
+            if (!prNumber) {
+              console.log('Could not determine PR number from any source, skipping PR comment');
+              console.log('Available sources:');
+              console.log('- Input pr_number:', '${{ inputs.pr_number }}');
+              console.log('- Context pull_request number:', context.payload.pull_request?.number);
+              console.log('- Context issue number:', context.issue?.number);
+              return;
+            }
+            
+            console.log('Using PR Number:', prNumber);
+            
+            // Add small delay to ensure summary file is fully written
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Read the test summary file that was created specifically for PR comments
+            const summaryFile = 'test-summary.md';
+            let summaryContent = '';
+            
+            try {
+              if (!fs.existsSync(summaryFile)) {
+                console.log('Test summary file does not exist:', summaryFile);
+                return;
+              }
+              
+              summaryContent = fs.readFileSync(summaryFile, 'utf8');
+              console.log('Successfully read test summary file');
+              console.log('Summary file path:', summaryFile);
+              console.log('Summary content length:', summaryContent.length);
+              console.log('Summary preview (first 300 chars):', summaryContent.substring(0, 300));
+              console.log('Summary content (full):', summaryContent);
+              
+              // Check if summary actually contains test results (look for specific content)
+              if (!summaryContent || summaryContent.trim() === '') {
+                console.log('Test summary is empty, skipping PR comment');
+                console.log('Summary content available:', summaryContent ? 'yes' : 'no');
+                return;
+              }
+              
+              // Check if summary contains meaningful test report content
+              const hasTestResults = summaryContent.includes('Test Report Summary') || 
+                                   summaryContent.includes('Test Results Overview') ||
+                                   summaryContent.includes('Module Test Breakdown') ||
+                                   summaryContent.includes('No tests found');
+              
+              if (!hasTestResults) {
+                console.log('Test summary does not contain test results, skipping PR comment');
+                console.log('Summary content preview:', summaryContent.substring(0, 500));
+                console.log('Contains Test Report Summary:', summaryContent.includes('Test Report Summary'));
+                console.log('Contains Test Results Overview:', summaryContent.includes('Test Results Overview'));
+                console.log('Contains Module Test Breakdown:', summaryContent.includes('Module Test Breakdown'));
+                console.log('Contains No tests found:', summaryContent.includes('No tests found'));
+                return;
+              }
+              
+            } catch (error) {
+              console.log('Could not read test summary file:', error.message);
+              console.log('Skipping PR comment since summary is not available');
+              return;
+            }
+            
+            // Add PR-specific header and footer to the existing summary
+            let comment = `## 🧪 Maven Test Results\n\n`;
+            comment += summaryContent;
+            comment += `\n\n---\n*This summary was generated by the Maven Test Workflow for Pull Request #${prNumber}*`;
+            
+            // Post comment to PR
+            try {
+              const result = await github.rest.issues.createComment({
+                issue_number: parseInt(prNumber),
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+              console.log('Successfully posted PR comment with ID:', result.data.id);
+            } catch (error) {
+              console.log('Failed to post PR comment:', error.message);
+              console.log('Error details:', error);
+              console.log('Attempting to post to repo:', context.repo.owner + '/' + context.repo.repo);
+              console.log('PR number used:', prNumber);
+              throw error; // Re-throw to mark step as failed
+            }
+        
+      - name: Upload Surefire reports
+        if: ${{ inputs.test-report }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: target/reports/
+          retention-days: 30
+          
+      - name: Upload individual module reports
+        if: ${{ inputs.test-report }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-modules-report
+          path: |
+            */target/site/surefire-report.html
+            */target/surefire-reports/
+          retention-days: 30
