@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: true
+      java_version:
+        description: 'Java version to use'
+        required: false
+        type: string
+        default: '17'
 
 jobs:
   update_version:
@@ -39,7 +44,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: ${{ inputs.java_version }}
           distribution: 'zulu'
           cache: maven
 
