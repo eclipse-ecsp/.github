@@ -50,6 +50,11 @@ on:
         required: false
         type: string
         default: '17'
+      java_distribution:
+        description: "The distribution of Java to use"
+        required: false
+        type: string
+        default: "zulu"
 
 jobs:
   build-and-push:
@@ -66,7 +71,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: ${{ inputs.java_version }}
-          distribution: zulu
+          distribution: ${{ inputs.java_distribution }}
           cache: maven
 
       # Step to extract Maven artifact details (groupId, artifactId, version) from the `pom.xml`.
