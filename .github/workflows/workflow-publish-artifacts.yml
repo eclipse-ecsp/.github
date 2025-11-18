@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: '17'
+      java_distribution:
+        description: "The distribution of Java to use"
+        required: false
+        type: string
+        default: "zulu"
       release_version:
         description: 'The release version to use'
         required: false
@@ -50,7 +55,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: ${{ inputs.java_version }}
-          distribution: 'zulu'
+          distribution: ${{ inputs.java_distribution }}
           cache: maven
 
       - uses: eclipse-ecsp/.github/.github/actions/import-gpg-key@main
