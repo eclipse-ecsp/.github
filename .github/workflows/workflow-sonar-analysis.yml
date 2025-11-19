@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ''
+      debug:
+        description: 'Enable debug output'
+        required: false
+        type: boolean
+        default: false
     secrets:
       token:
         required: true
@@ -36,38 +41,72 @@ jobs:
         run: |
           if [[ "${{ secrets.token }}" == "" ]]; then
             echo "SONAR_TOKEN is not set. Skipping Sonar analysis."
-            echo "sonar_enabled=false" >> $GITHUB_ENV
+            echo "enabled=false" >> $GITHUB_OUTPUT
           else
             echo "SONAR_TOKEN is set. Sonar analysis will be performed."
-            echo "sonar_enabled=true" >> $GITHUB_ENV
+            echo "enabled=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout code
-        if: ${{ env.sonar_enabled == 'true' }}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Debug branch information
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' && inputs.debug }}
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Current branch: ${{ github.ref_name }}"
+          echo "Current ref: ${{ github.ref }}"
+          echo "Base ref: ${{ github.base_ref }}"
+          echo "Head ref: ${{ github.head_ref }}"
+          echo "Is pull request: ${{ github.event_name == 'pull_request' }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "PR number: ${{ github.event.pull_request.number }}"
+            echo "PR head branch: ${{ github.head_ref }}"
+            echo "PR base branch: ${{ github.base_ref }}"
+          fi
+
       - name: Compute Sonar Key
         id: compute-sonar-key
-        if: ${{ env.sonar_enabled == 'true'}}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true'}}
         run: |
             if [[ "${{ inputs.sonar_project_key }}" == "" ]]; then
-                 echo "sonar_key=${GITHUB_REPOSITORY//\//_}" >> $GITHUB_ENV
+                 echo "sonar_key=${GITHUB_REPOSITORY//\//_}" >> $GITHUB_OUTPUT
             else
-                echo "sonar_key=${{ inputs.sonar_project_key }}" >> $GITHUB_ENV
+                echo "sonar_key=${{ inputs.sonar_project_key }}" >> $GITHUB_OUTPUT
             fi
       - name: Compute Sonar Organization
         id: compute-sonar-org
-        if: ${{ env.sonar_enabled == 'true'}}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true'}}
         run: |
           if [[ "${{ inputs.sonar_organization }}" == "" ]]; then
-               echo "sonar_organization=${{ github.repository_owner }}" >> $GITHUB_ENV
+               echo "sonar_organization=${{ github.repository_owner }}" >> $GITHUB_OUTPUT
           else
-              echo "sonar_organization=${{ inputs.sonar_organization }}" >> $GITHUB_ENV
+              echo "sonar_organization=${{ inputs.sonar_organization }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine branch or PR parameters
+        id: sonar-params
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # For pull requests, use PR-specific parameters
+            echo "is_pr=true" >> $GITHUB_OUTPUT
+            echo "pr_key=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "pr_branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+            echo "pr_base=${{ github.base_ref }}" >> $GITHUB_OUTPUT 
+            echo "SonarCloud will analyze PR #${{ github.event.pull_request.number }}: ${{ github.head_ref }} -> ${{ github.base_ref }}"
+          else
+            # For branch pushes, use branch name
+            echo "is_pr=false" >> $GITHUB_OUTPUT
+            BRANCH_NAME="${{ github.ref_name }}"
+            echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            echo "SonarCloud will analyze branch: $BRANCH_NAME"
           fi
       - name: Set up JDK
-        if: ${{ env.sonar_enabled == 'true' }}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ inputs.java_version }}
@@ -75,20 +114,38 @@ jobs:
           cache: maven
 
       - name: Cache Maven dependencies
-        if: ${{ env.sonar_enabled == 'true' }}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' }}
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: maven-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
           restore-keys: |
             maven-${{ runner.os }}-
-
       - name: Run SonarCloud Analysis
-        if: ${{ env.sonar_enabled == 'true' }}
+        if: ${{ steps.sonar-check.outputs.enabled == 'true' }}
         env:
           SONAR_TOKEN: ${{ secrets.token }}
         run: |
-          mvn clean verify sonar:sonar \
-            -Dsonar.projectKey=${{ env.sonar_key }} \
-            -Dsonar.organization=${{ env.sonar_organization }} \
-            -Dsonar.token=${{ secrets.token }}
+          # Build base Maven command
+          MAVEN_CMD="mvn clean verify sonar:sonar"
+          MAVEN_CMD="$MAVEN_CMD -Dsonar.projectKey=${{ steps.compute-sonar-key.outputs.sonar_key }}"
+          MAVEN_CMD="$MAVEN_CMD -Dsonar.organization=${{ steps.compute-sonar-org.outputs.sonar_organization }}"
+          MAVEN_CMD="$MAVEN_CMD -Dsonar.token=${{ secrets.token }}"
+          
+          # Add branch or PR specific parameters
+          if [[ "${{ steps.sonar-params.outputs.is_pr }}" == "true" ]]; then
+            echo "Running SonarCloud analysis for Pull Request #${{ steps.sonar-params.outputs.pr_key }}"
+            MAVEN_CMD="$MAVEN_CMD -Dsonar.pullrequest.key=${{ steps.sonar-params.outputs.pr_key }}"
+            MAVEN_CMD="$MAVEN_CMD -Dsonar.pullrequest.branch=${{ steps.sonar-params.outputs.pr_branch }}"
+            MAVEN_CMD="$MAVEN_CMD -Dsonar.pullrequest.base=${{ steps.sonar-params.outputs.pr_base }}"
+          else
+            BRANCH_NAME="${{ steps.sonar-params.outputs.branch_name }}"
+            echo "Running SonarCloud analysis for branch: $BRANCH_NAME"
+            # Only add branch parameter for non-default branches
+            if [[ "$BRANCH_NAME" != "main" && "$BRANCH_NAME" != "master" ]]; then
+              MAVEN_CMD="$MAVEN_CMD -Dsonar.branch.name=$BRANCH_NAME"
+            fi
+          fi
+          
+          echo "Executing: $MAVEN_CMD"
+          eval $MAVEN_CMD
