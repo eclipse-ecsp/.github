@@ -363,7 +363,11 @@ jobs:
               console.log('Error details:', error);
               console.log('Attempting to post to repo:', context.repo.owner + '/' + context.repo.repo);
               console.log('PR number used:', prNumber);
-              throw error; // Re-throw to mark step as failed
+              if (error.status === 403) {
+                console.log('::warning::Permission denied (403) when posting comment. This is expected for PRs from forks where the token is read-only.');
+              } else {
+                throw error; // Re-throw to mark step as failed
+              }
             }
         
       - name: Upload Surefire reports
