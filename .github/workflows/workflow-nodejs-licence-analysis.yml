@@ -18,7 +18,7 @@ on:
       token:
         required: false
         type: string
-        default: ${{ github.token }}
+        default: ''
 
 jobs:
   license-check:
@@ -47,3 +47,5 @@ jobs:
       - name: Run License Check with review
         if: ${{ inputs.create-review && inputs.token }}
         run: npm run license:check:review
+        env:
+          DASH_TOKEN: ${{ inputs.token }}
