@@ -15,6 +15,10 @@ on:
         required: false
         type: boolean
         default: true
+      token:
+        required: false
+        type: string
+        default: ${{ github.token }}
 
 jobs:
   license-check:
@@ -37,9 +41,9 @@ jobs:
           java-version: ${{ inputs.java-version }}
 
       - name: Run License Check 
-        if: ${{ !inputs.create-review }}
+        if: ${{ !inputs.create-review && !inputs.token }}
         run: npm run license:check
 
       - name: Run License Check with review
-        if: ${{ inputs.create-review }}
+        if: ${{ inputs.create-review && inputs.token }}
         run: npm run license:check:review
