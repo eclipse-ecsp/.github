@@ -57,8 +57,24 @@ jobs:
           name: coverage
           path: coverage
 
+      - name: Check if Sonar is enabled
+        id: sonar-check
+        run: |
+          if [[ "${{ secrets.token }}" == "" ]]; then
+            echo "SONAR_TOKEN is not set. Skipping Sonar analysis."
+            echo "sonar_enabled=false" >> $GITHUB_ENV
+          else
+            echo "SONAR_TOKEN is set. Sonar analysis will be performed."
+            if [[ "${{ inputs.sonar-analysis }}" == "true" ]]; then
+            echo "sonar_enabled=true" >> $GITHUB_ENV
+            else
+            echo "sonar_enabled=false" >> $GITHUB_ENV
+            fi
+          fi
+
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v7.0.0
+        if: ${{ env.sonar_enabled == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v4
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
