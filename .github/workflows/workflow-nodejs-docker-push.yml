@@ -7,14 +7,18 @@ on:
         required: false
         type: string
         default: 'docker.io'
+      registry_namespace:
+        required: false
+        type: string
+        default: 'eclipseecsp'
       image-name:
         required: false
         type: string
         default: ${{ github.repository }}
-      image-version:
+      image-tag:
         required: false
         type: string
-        default: 'latest'
+        default: ''
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -37,16 +41,17 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_API_TOKEN }}
 
+      # Step to extract metadata (tags, labels) for the Docker image.
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v5.7.0
         with:
-          images: ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.image-version }}
+          images: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ inputs.image-name }}:${{ inputs.image-tag }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ inputs.image-name }}:${{ inputs.image-tag }}
           labels: ${{ steps.meta.outputs.labels }}
