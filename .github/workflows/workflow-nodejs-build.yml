@@ -60,7 +60,7 @@ jobs:
       - name: Check if Sonar is enabled
         id: sonar-check
         run: |
-          if [[ "${{ secrets.token }}" == "" ]]; then
+          if [[ "${{ secrets.SONAR_TOKEN }}" == "" ]]; then
             echo "SONAR_TOKEN is not set. Skipping Sonar analysis."
             echo "sonar_enabled=false" >> $GITHUB_ENV
           else
