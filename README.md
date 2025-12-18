@@ -28,6 +28,15 @@ This repository contains reusable GitHub Actions workflows for Java projects, es
   * create workflow summary with eol details
   * comment on the pr with eol report if the workflow event is pull_request
 
+- **workflow-nodejs-build.yml**
+  Builds Node.js project and runs tests. Optionally runs SonarCloud analysis.
+
+- **workflow-nodejs-docker-push.yml**
+  Builds and pushes Docker image for Node.js project.
+
+- **workflow-nodejs-licence-analysis.yml**
+  Checks license compliance for Node.js project.
+
 ## Actions
 
 - **import-gpg-key**  
@@ -217,6 +226,46 @@ jobs:
           echo "Found ${{ needs.check-dependencies.outputs.approaching-count }} dependencies approaching EOL"
 ```
 ---
+
+### Node.js Build
+
+```yaml
+jobs:
+  build:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-build.yml@main
+    with:
+      node-version: '20'
+      sonar-analysis: true
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+```
+
+### Node.js Docker Build and Push
+
+```yaml
+jobs:
+  docker:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-docker-push.yml@main
+    with:
+      registry: 'docker.io'
+      image-name: 'my-node-app'
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_API_TOKEN: ${{ secrets.DOCKER_API_TOKEN }}
+```
+
+### Node.js License Analysis
+
+```yaml
+jobs:
+  license:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-nodejs-licence-analysis.yml@main
+    with:
+      node-version: '20'
+      java-version: '17'
+      create-review: true
+```
+
 ## Requirements
 
 - Java 17+ (configurable)

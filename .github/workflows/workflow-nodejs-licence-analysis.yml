@@ -1,0 +1,45 @@
+name: License Compliance
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        required: false
+        type: string
+        default: '20'
+      java-version:
+        required: false
+        type: string
+        default: '17'
+      create-review:
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+      
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ inputs.java-version }}
+
+      - name: Run License Check 
+        if: ${{ !inputs.create-review }}
+        run: npm run license:check
+
+      - name: Run License Check with review
+        if: ${{ inputs.create-review }}
+        run: npm run license:check:review
