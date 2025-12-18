@@ -47,8 +47,7 @@ jobs:
         with:
           images: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ inputs.image-name }}
           tags: |
-           type=semver,pattern={{version}},value=${{ inputs.image-tag }}
-          
+           type=semver,pattern={{version}},value=${{ inputs.image-tag }}         
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
