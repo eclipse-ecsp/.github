@@ -10,11 +10,13 @@ on:
     outputs:
       version: 
         description: 'The extracted project version'
-        value: string
+        value: ${{ jobs.build-and-test.outputs.version }}
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract-version.outputs.app_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,14 +32,14 @@ jobs:
           if [[ "${{ github.event_name }}" == "release" ]]; then
               if [[ "${{ github.event.release.tag_name }}" == v* ]]; then
                   version=${{ github.event.release.tag_name }}
-                  echo "release_version=${version:1}" >> $GITHUB_ENV
-                  echo "::set-output name=release_version::${version:1}"
+                  echo "app_version=${version:1}" >> $GITHUB_ENV
+                  echo "app_version=${version:1}" >> $GITHUB_OUTPUT
               else
-                  echo "release_version=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
-                  echo "::set-output name=release_version::${{ github.event.release.tag_name }}"
+                  echo "app_version=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+                  echo "app_version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
               fi
           else
              version=$(node -p "require('./package.json').version")
-             echo "release_version=${version}" >> $GITHUB_ENV
-             echo "::set-output name=release_version::${version}" 
+             echo "app_version=${version}" >> $GITHUB_ENV
+             echo "app_version=${version}" >> $GITHUB_OUTPUT
           fi
