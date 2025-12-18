@@ -11,6 +11,10 @@ on:
         required: false
         type: string
         default: ${{ github.repository }}
+      image-version:
+        required: false
+        type: string
+        default: 'latest'
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -37,7 +41,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ inputs.registry }}/${{ inputs.image-name }}
+          images: ${{ inputs.registry }}/${{ inputs.image-name }}:${{ inputs.image-version }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
