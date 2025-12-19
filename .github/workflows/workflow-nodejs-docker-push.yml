@@ -14,7 +14,7 @@ on:
       image-name:
         required: false
         type: string
-        default: ${{ github.repository }}
+        default: ''
       image-tag:
         required: false
         type: string
@@ -40,12 +40,21 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_API_TOKEN }}
 
+      - name: Get image name
+        id: image_name
+        run: |
+          if [ -n "${{ inputs.image-name }}" ]; then
+            echo "name=${{ inputs.image-name }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REPOSITORY#*/}" >> $GITHUB_OUTPUT
+          fi
+
       # Step to extract metadata (tags, labels) for the Docker image.
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5.7.0
         with:
-          images: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ inputs.image-name }}
+          images: ${{ inputs.registry }}/${{ inputs.registry_namespace }}/${{ steps.image_name.outputs.name }}
           tags: |
            type=semver,pattern={{version}},value=${{ inputs.image-tag }}         
 
