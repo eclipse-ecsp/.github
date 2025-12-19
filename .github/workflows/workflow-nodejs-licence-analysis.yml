@@ -15,6 +15,10 @@ on:
         required: false
         type: boolean
         default: true
+      timeout:
+        required: false
+        type: string
+        default: '100'
     secrets:
       token:
         required: false
@@ -41,10 +45,10 @@ jobs:
 
       - name: Run License Check 
         if: ${{ !inputs.create-review }}
-        run: npm run license:check
+        run: npm run license:check -- --timeout=${{ inputs.timeout }}
 
       - name: Run License Check with review
         if: ${{ inputs.create-review }}
-        run: npm run license:check:review
+        run: npm run license:check:review -- --timeout=${{ inputs.timeout }}
         env:
           DASH_TOKEN: ${{ secrets.token }}
