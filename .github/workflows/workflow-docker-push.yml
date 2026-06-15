@@ -55,6 +55,13 @@ on:
         required: false
         type: string
         default: "zulu"
+    secrets:
+      DOCKER_USERNAME:
+        description: "Username for authenticating to the container registry"
+        required: true
+      DOCKER_API_TOKEN:
+        description: "API token/password for authenticating to the container registry"
+        required: true
 
 jobs:
   build-and-push:

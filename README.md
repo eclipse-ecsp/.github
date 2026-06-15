@@ -22,11 +22,33 @@ This repository contains reusable GitHub Actions workflows for Java projects, es
 - **workflow-dependencies-update.yml**  
   Automatically updates the `DEPENDENCIES` file using Eclipse Dash and creates a pull request if changes are detected.
 
+- **workflow-update-next-version.yml**  
+  Updates the Maven project version and creates a pull request with the new version.
+
 - **workflow-eol-analysis.yml**
   It helps identify dependencies that are either EOL or approaching their end-of-life date.
   * creates a pull request if any eol dependencies are found(only schedule run).
   * create workflow summary with eol details
   * comment on the pr with eol report if the workflow event is pull_request
+
+## Secrets Reference
+
+Each reusable workflow declares only the secrets it needs. Callers must pass these explicitly — `secrets: inherit` is not used.
+
+| Workflow | Secret key | Required | Description |
+|---|---|---|---|
+| `workflow-maven-run.yml` | `token` | Yes | GitHub token for checkout (use `GITHUB_TOKEN`) |
+| `workflow-docker-push.yml` | `DOCKER_USERNAME` | Yes | Username for the container registry |
+| `workflow-docker-push.yml` | `DOCKER_API_TOKEN` | Yes | API token/password for the container registry |
+| `workflow-sonar-analysis.yml` | `token` | Yes | SonarCloud token |
+| `workflow-licences-analysis.yml` | `token` | No | Eclipse Dash IP Lab token (required only when `create-review: true`) |
+| `workflow-publish-artifacts.yml` | `GPG_PASSPHRASE` | Yes | Passphrase for the GPG signing key |
+| `workflow-publish-artifacts.yml` | `GPG_PRIVATE_KEY` | Yes | GPG private key used to sign artifacts |
+| `workflow-publish-artifacts.yml` | `CENTRAL_SONATYPE_TOKEN_USERNAME` | Yes | Sonatype Central username token |
+| `workflow-publish-artifacts.yml` | `CENTRAL_SONATYPE_TOKEN_PASSWORD` | Yes | Sonatype Central password token |
+| `workflow-dependencies-update.yml` | `ECSP_BOT_PAT` | Yes | PAT used by the bot to create pull requests |
+| `workflow-update-next-version.yml` | `ECSP_BOT_PAT` | Yes | PAT used by the bot to create pull requests |
+| `workflow-eol-analysis.yml` | — | — | No secrets required |
 
 ## Actions
 
@@ -146,6 +168,24 @@ jobs:
       pull-requests: write
       contents: read
 ```
+
+### Update Next Version
+
+```yaml
+jobs:
+  update-next-version:
+    uses: eclipse-ecsp/.github/.github/workflows/workflow-update-next-version.yml@main
+    with:
+      version: '1.2.0'
+      update_snapshot: true
+      java_version: '17'
+    secrets:
+      ECSP_BOT_PAT: ${{ secrets.ECSP_BOT_PAT }}
+    permissions:
+      pull-requests: write
+      contents: write
+```
+
 ---
 ### EOL Analysis
 

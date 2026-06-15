@@ -18,6 +18,19 @@ on:
         required: false
         type: string
         default: ''
+    secrets:
+      GPG_PASSPHRASE:
+        description: "Passphrase for the GPG key used to sign artifacts"
+        required: true
+      GPG_PRIVATE_KEY:
+        description: "GPG private key used to sign artifacts"
+        required: true
+      CENTRAL_SONATYPE_TOKEN_USERNAME:
+        description: "Username token for authenticating to Maven Central / Sonatype"
+        required: true
+      CENTRAL_SONATYPE_TOKEN_PASSWORD:
+        description: "Password token for authenticating to Maven Central / Sonatype"
+        required: true
 
 jobs:
   secret-presence:

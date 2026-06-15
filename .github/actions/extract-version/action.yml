@@ -1,0 +1,23 @@
+name: "Extract Release Version"
+description: "Extracts the release version, stripping the 'v' prefix if present. Falls back to Maven project version on non-release events."
+outputs:
+  release_version:
+    description: "The extracted release version without the 'v' prefix."
+    value: ${{ steps.set_version.outputs.release_version }}
+runs:
+  using: "composite"
+  steps:
+    - id: set_version
+      shell: bash
+      run: |
+        if [[ "${{ github.event_name }}" == "release" ]]; then
+          tag="${{ github.event.release.tag_name }}"
+          if [[ "$tag" == v* ]]; then
+            version="${tag:1}"
+          else
+            version="$tag"
+          fi
+        else
+          version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout | sed 's/-SNAPSHOT//')
+        fi
+        echo "release_version=$version" >> "$GITHUB_OUTPUT"
